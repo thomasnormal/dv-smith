@@ -6,13 +6,7 @@ import os
 from pathlib import Path
 from typing import Any, Optional
 
-# OpenAI is optional for AI-powered task generation
-try:
-    from openai import OpenAI
-    HAS_OPENAI = True
-except ImportError:
-    HAS_OPENAI = False
-    OpenAI = None
+from anthropic import Anthropic
 
 from .models import (
     AcceptanceCriteria,
@@ -31,28 +25,20 @@ class TaskGenerator:
         """Initialize task generator.
 
         Args:
-            repo_analysis: Analysis results from RepoAnalyzer
+            repo_analysis: Analysis results from AI analyzer
             profile_config: Profile configuration (for grading/thresholds)
         """
         self.analysis = repo_analysis
         self.config = profile_config
         self.backup_dir = Path("backups/original_tests")
 
-        # Initialize OpenAI client if API key is available
-        self.use_ai = False
-        self.client = None
-        api_key = os.getenv("OPENAI_API_KEY")
-        if HAS_OPENAI and api_key:
-            try:
-                self.client = OpenAI(api_key=api_key)
-                self.use_ai = True
-                print("[TaskGen] Using AI for task descriptions")
-            except Exception as e:
-                print(f"[TaskGen] AI unavailable, using templates: {e}")
-        elif not HAS_OPENAI:
-            print("[TaskGen] OpenAI library not installed, using template descriptions")
-        else:
-            print("[TaskGen] OPENAI_API_KEY not set, using template descriptions")
+        # Initialize Anthropic client (required)
+        api_key = os.getenv("ANTHROPIC_API_KEY")
+        if not api_key:
+            raise ValueError("ANTHROPIC_API_KEY environment variable is required")
+
+        self.client = Anthropic(api_key=api_key)
+        print("[TaskGen] Using Claude for task descriptions")
 
     def generate_tasks(self, output_dir: Path,
                       smoke_tests: Optional[list[str]] = None) -> list[TaskSpec]:
@@ -243,7 +229,7 @@ class TaskGenerator:
         return targets
 
     def _extract_hints(self, test: UVMTest) -> list[str]:
-        """Extract hints from test description and name.
+        """Extract hints from test description and name using AI.
 
         Args:
             test: UVM test
@@ -251,40 +237,10 @@ class TaskGenerator:
         Returns:
             List of hint strings
         """
-        if self.use_ai:
-            return self._extract_hints_with_ai(test)
-
-        hints = []
-
-        # Use description if available
-        if test.description:
-            hints.append(test.description)
-
-        # Generate hints from test name patterns (fallback)
-        name_lower = test.name.lower()
-
-        if "sparse" in name_lower or "strobe" in name_lower:
-            hints.append("Use sparse write strobes with varied byte enables")
-
-        if "wait" in name_lower:
-            hints.append("Exercise programmable wait states")
-
-        if "error" in name_lower or "err" in name_lower:
-            hints.append("Inject error responses")
-
-        if "burst" in name_lower:
-            hints.append("Vary burst lengths and types")
-
-        if "random" in name_lower:
-            hints.append("Use constrained randomization")
-
-        if "concurrent" in name_lower or "parallel" in name_lower:
-            hints.append("Run multiple concurrent transactions")
-
-        return hints
+        return self._extract_hints_with_ai(test)
 
     def _generate_description(self, test: UVMTest) -> str:
-        """Generate task description from test.
+        """Generate task description from test using AI.
 
         Args:
             test: UVM test
@@ -292,18 +248,10 @@ class TaskGenerator:
         Returns:
             Description string
         """
-        if self.use_ai:
-            return self._generate_description_with_ai(test)
-
-        if test.description:
-            return test.description
-
-        # Generate generic description based on name (fallback)
-        name_readable = self._derive_task_name(test.name)
-        return f"Write a UVM test that exercises {name_readable.lower()} functionality."
+        return self._generate_description_with_ai(test)
 
     def _generate_goal(self, test: UVMTest) -> str:
-        """Generate task goal statement.
+        """Generate task goal statement using AI.
 
         Args:
             test: UVM test
@@ -311,12 +259,7 @@ class TaskGenerator:
         Returns:
             Goal string
         """
-        if self.use_ai:
-            return self._generate_goal_with_ai(test)
-
-        name_readable = self._derive_task_name(test.name)
-        return (f"Write a UVM test and sequence(s) that achieve the functional "
-                f"and code coverage targets for {name_readable.lower()}.")
+        return self._generate_goal_with_ai(test)
 
     def _generate_notes(self, test: UVMTest) -> Optional[str]:
         """Generate additional notes about the task.
@@ -396,26 +339,23 @@ Do NOT include implementation details like "write a UVM test" - focus on WHAT ne
 Return ONLY the description text, no markdown, no quotes."""
 
         try:
-            response = self.client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[
-                    {"role": "system", "content": "You are an expert verification engineer writing task specifications. Be thorough and specific."},
-                    {"role": "user", "content": prompt}
-                ],
+            response = self.client.messages.create(
+                model="claude-3-5-sonnet-20241022",
+                max_tokens=300,
                 temperature=0.7,
-                max_tokens=300
+                system="You are an expert verification engineer writing task specifications. Be thorough and specific.",
+                messages=[
+                    {"role": "user", "content": prompt}
+                ]
             )
 
-            description = response.choices[0].message.content.strip()
+            description = response.content[0].text.strip()
             # Remove quotes if AI added them
             description = description.strip('"\'')
             return description
 
         except Exception as e:
-            print(f"[TaskGen] Warning: AI description generation failed: {e}")
-            # Fallback
-            name_readable = self._derive_task_name(test.name)
-            return test.description or f"Verify {name_readable.lower()} functionality with thorough transaction coverage."
+            raise RuntimeError(f"AI description generation failed: {e}") from e
 
     def _generate_goal_with_ai(self, test: UVMTest) -> str:
         """Generate task goal using AI.
@@ -440,25 +380,22 @@ The goal should mention:
 Keep it actionable and clear. Return ONLY the goal text."""
 
         try:
-            response = self.client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[
-                    {"role": "system", "content": "You are an expert verification engineer. Write clear, actionable goals."},
-                    {"role": "user", "content": prompt}
-                ],
+            response = self.client.messages.create(
+                model="claude-3-5-sonnet-20241022",
+                max_tokens=150,
                 temperature=0.6,
-                max_tokens=150
+                system="You are an expert verification engineer. Write clear, actionable goals.",
+                messages=[
+                    {"role": "user", "content": prompt}
+                ]
             )
 
-            goal = response.choices[0].message.content.strip()
+            goal = response.content[0].text.strip()
             goal = goal.strip('"\'')
             return goal
 
         except Exception as e:
-            print(f"[TaskGen] Warning: AI goal generation failed: {e}")
-            # Fallback
-            name_readable = self._derive_task_name(test.name)
-            return f"Write a UVM test and sequence(s) that achieve the functional and code coverage targets for {name_readable.lower()}."
+            raise RuntimeError(f"AI goal generation failed: {e}") from e
 
     def _extract_hints_with_ai(self, test: UVMTest) -> list[str]:
         """Extract helpful hints using AI.
@@ -498,17 +435,17 @@ Example: ["Use the base write sequence with 8-bit data width", "Configure addres
 """
 
         try:
-            response = self.client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[
-                    {"role": "system", "content": "You are an expert verification engineer. Provide helpful but not overly explicit hints."},
-                    {"role": "user", "content": prompt}
-                ],
+            response = self.client.messages.create(
+                model="claude-3-5-sonnet-20241022",
+                max_tokens=400,
                 temperature=0.7,
-                max_tokens=400
+                system="You are an expert verification engineer. Provide helpful but not overly explicit hints.",
+                messages=[
+                    {"role": "user", "content": prompt}
+                ]
             )
 
-            content = response.choices[0].message.content.strip()
+            content = response.content[0].text.strip()
             # Extract JSON if wrapped in markdown
             if "```json" in content:
                 content = content.split("```json")[1].split("```")[0].strip()
@@ -519,18 +456,4 @@ Example: ["Use the base write sequence with 8-bit data width", "Configure addres
             return hints if isinstance(hints, list) else [hints]
 
         except Exception as e:
-            print(f"[TaskGen] Warning: AI hints generation failed: {e}")
-            # Fallback to template-based hints
-            hints = []
-            if test.description:
-                hints.append(test.description)
-
-            name_lower = test.name.lower()
-            if "write" in name_lower:
-                hints.append("Create a sequence that generates write transactions")
-            if "read" in name_lower:
-                hints.append("Implement read transaction generation and checking")
-            if "8b" in name_lower or "16b" in name_lower or "32b" in name_lower:
-                hints.append("Configure data width to match test requirements")
-
-            return hints if hints else ["Extend the base test class and configure appropriate sequences"]
+            raise RuntimeError(f"AI hints generation failed: {e}") from e

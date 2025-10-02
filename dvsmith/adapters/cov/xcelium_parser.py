@@ -40,11 +40,16 @@ class XceliumCoverageParser:
 
             if functional_file.exists():
                 functional_content = functional_file.read_text()
-                report.functional_groups = self._parse_functional_coverage(functional_content)
+                report.functional_groups = self._parse_functional_coverage_old(functional_content)
 
             if code_file.exists():
                 code_content = code_file.read_text()
                 report.code_coverage = self._parse_code_coverage(code_content)
+            elif (report_path / "summary.txt").exists():
+                # Fallback to summary file if code.txt not available
+                summary_file = report_path / "summary.txt"
+                summary_content = summary_file.read_text()
+                report.code_coverage = self._parse_code_coverage_from_summary(summary_content)
         elif report_path.exists():
             # Single file containing all coverage
             content = report_path.read_text()
@@ -300,5 +305,38 @@ class XceliumCoverageParser:
         # Branch coverage approximation (use block if no explicit branch)
         if block_vals and not code_cov.branches_pct:
             code_cov.branches_pct = sum(block_vals) / len(block_vals)
+
+        return code_cov
+
+    def _parse_code_coverage_from_summary(self, content) -> CodeCoverage:
+        """Parse code coverage from summary format.
+
+        Args:
+            content: Either a string or Path to the summary file
+
+        Summary format:
+            Coverage Summary:
+            Statement    1234/5000    75.0%
+            Branch       567/890      65.0%
+            Toggle       2345/3000    80.0%
+        """
+        code_cov = CodeCoverage()
+
+        # Handle Path input
+        if isinstance(content, Path):
+            content = content.read_text()
+
+        # Patterns for summary format: "Coverage Type    X/Y    Z.Z%"
+        patterns = {
+            "statements_pct": r"Statement\s+\d+/\d+\s+(\d+\.?\d*)%",
+            "branches_pct": r"Branch\s+\d+/\d+\s+(\d+\.?\d*)%",
+            "toggles_pct": r"Toggle\s+\d+/\d+\s+(\d+\.?\d*)%",
+            "fsm_pct": r"FSM\s+\d+/\d+\s+(\d+\.?\d*)%",
+        }
+
+        for field, pattern in patterns.items():
+            match = re.search(pattern, content)
+            if match:
+                setattr(code_cov, field, float(match.group(1)))
 
         return code_cov

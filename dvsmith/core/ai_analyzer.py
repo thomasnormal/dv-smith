@@ -1,4 +1,4 @@
-"""AI-powered repository analyzer using OpenAI."""
+"""AI-powered repository analyzer using Anthropic Claude."""
 
 import json
 import os
@@ -7,13 +7,13 @@ import subprocess
 from pathlib import Path
 from typing import Any, Optional
 
-from openai import OpenAI
+from anthropic import Anthropic
 
 from .models import BuildSystem, RepoAnalysis, Simulator, UVMSequence, UVMTest
 
 
 class AIRepoAnalyzer:
-    """Use LLM to analyze UVM repository structure and extract metadata."""
+    """Use Claude to analyze UVM repository structure and extract metadata."""
 
     def __init__(self, repo_root: Path) -> None:
         """Initialize AI analyzer.
@@ -25,12 +25,12 @@ class AIRepoAnalyzer:
         if not self.repo_root.exists():
             raise ValueError(f"Repository not found: {repo_root}")
 
-        # Initialize OpenAI client
-        api_key = os.getenv("OPENAI_API_KEY")
+        # Initialize Anthropic client
+        api_key = os.getenv("ANTHROPIC_API_KEY")
         if not api_key:
-            raise ValueError("OPENAI_API_KEY not found in environment")
+            raise ValueError("ANTHROPIC_API_KEY not found in environment")
 
-        self.client = OpenAI(api_key=api_key)
+        self.client = Anthropic(api_key=api_key)
 
     def analyze(self) -> RepoAnalysis:
         """Analyze repository using AI.
@@ -133,67 +133,127 @@ class AIRepoAnalyzer:
         Returns:
             Dictionary with directory paths
         """
-        # Get list of directories with test/Test in name AND sample files
-        test_dir_info = []
+        # Get list of directories with test/Test in name AND identify test files by content
+        test_dir_candidates = []
         for path in self.repo_root.rglob("*"):
             if path.is_dir() and ("test" in path.name.lower() or "Test" in path.name):
                 try:
                     rel = path.relative_to(self.repo_root)
                     sv_files = list(path.glob("*.sv"))
-                    if sv_files:
-                        # Sample first file
-                        sample = sv_files[0].name
-                        test_dir_info.append(f"{rel} (contains: {sample})")
+
+                    if not sv_files:
+                        continue
+
+                    # Identify test files by content analysis (not filename pattern)
+                    test_files = []
+                    for sv_file in sv_files:
+                        try:
+                            # Read first 3000 chars to check for test class indicators
+                            # (handles files with long license headers)
+                            content = sv_file.read_text(encoding='utf-8', errors='ignore')[:3000]
+                            content_lower = content.lower()
+
+                            # Check for UVM test class patterns
+                            is_test = (
+                                ('class' in content_lower and 'extends' in content_lower) and
+                                ('test' in content_lower or 'uvm_test' in content_lower or 'uvm_component' in content_lower)
+                            )
+
+                            if is_test:
+                                test_files.append(sv_file)
+                        except:
+                            # If can't read file, skip it
+                            pass
+
+                    if test_files:
+                        # Sample files and count
+                        samples = [f.name for f in test_files[:3]]
+                        priority = "HIGH" if "src" in str(rel) or "hvl" in str(rel) else "LOW"
+                        test_dir_candidates.append({
+                            "path": str(rel),
+                            "count": len(test_files),
+                            "samples": samples,
+                            "priority": priority
+                        })
                 except:
                     pass
 
+        # Sort by priority (HIGH first) then by count (most tests first)
+        test_dir_candidates.sort(key=lambda x: (x["priority"] == "LOW", -x["count"]))
+
+        # If we found exactly one test directory, use it directly (no need for AI to choose)
+        if len(test_dir_candidates) == 1:
+            print(f"[AI Analyzer] Found single test directory: {test_dir_candidates[0]['path']}")
+            return {"tests_dir": test_dir_candidates[0]['path'], "sequences_dir": None, "env_dir": None, "agents_dir": None}
+
+        # Format for prompt
+        test_dir_info = []
+        for c in test_dir_candidates[:10]:
+            test_dir_info.append(f"{c['path']} [{c['priority']} priority, {c['count']} tests: {', '.join(c['samples'])}]")
+
         prompt = f"""Analyze this SystemVerilog/UVM repository and identify the COMPLETE EXACT directory paths.
 
-Repository structure:
-```
-{file_tree[:3000]}
-```
+Test directory candidates (sorted by priority and test count):
+{chr(10).join(test_dir_info) if test_dir_info else "No test directories found"}
 
-Directories with 'test' or 'Test' in name (with sample files):
-{chr(10).join(test_dir_info[:20])}
+Based on the test directory candidates above, identify:
+1. tests_dir: Choose the BEST directory for integration tests (UVM test classes)
+   - PREFER directories marked [HIGH priority] - these are typically in src/hvl_top/test or similar
+   - AVOID unit_test/* paths - these are for component unit tests, not integration tests
+   - Pick the directory with the MOST test files if multiple HIGH priority directories exist
 
-Based on the ACTUAL directory structure above, identify:
-1. tests_dir: The directory that contains UVM test class files (files like *Test.sv or *_test.sv)
-2. sequences_dir: The directory with sequence files (files like *Seq.sv or *Sequence.sv)
-3. env_dir: The directory with environment files (look for *Env.sv)
-4. agents_dir: The directory with agent files (look for *Agent.sv)
+2. sequences_dir: Directory with sequence files (look for *_seq.sv or *_sequence.sv)
+3. env_dir: Directory with environment files (look for *_env.sv)
+4. agents_dir: Directory with agent files (look for *_agent.sv)
 
 CRITICAL RULES:
-- Use the COMPLETE path exactly as shown in "Directories with 'test' or 'Test' in name" list above
-- For example, if the list shows "I2C_tb_files/src/test", return exactly that, NOT "src/test"
-- Return ONLY directories that EXIST in the structure above
-- Do NOT simplify, shorten, or guess paths
+- Use the EXACT path from the "Test directory candidates" list above
+- For tests_dir, ALWAYS prefer [HIGH priority] over [LOW priority]
+- Return null if no suitable directory found
 
-Return ONLY a JSON object. Use null if not found.
-Example: {{"tests_dir": "I2C_tb_files/src/test", "sequences_dir": "I2C_tb_files/src/sequences", "env_dir": "I2C_tb_files/src/env", "agents_dir": null}}
+Return ONLY a JSON object.
+Example: {{"tests_dir": "src/hvl_top/test", "sequences_dir": "src/hvl_top/sequences", "env_dir": "src/hvl_top/env", "agents_dir": null}}
 """
 
-        response = self.client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": "You are an expert in SystemVerilog and UVM testbench structure. Return only valid JSON."},
-                {"role": "user", "content": prompt}
-            ],
+        response = self.client.messages.create(
+            model="claude-3-5-sonnet-20241022",
+            max_tokens=500,
             temperature=0.1,
-            max_tokens=500
+            system="You are an expert in SystemVerilog and UVM testbench structure. Return only valid JSON.",
+            messages=[
+                {"role": "user", "content": prompt}
+            ]
         )
 
         try:
-            content = response.choices[0].message.content.strip()
+            content = response.content[0].text.strip()
             # Extract JSON from markdown code blocks if present
             if "```json" in content:
                 content = content.split("```json")[1].split("```")[0].strip()
             elif "```" in content:
                 content = content.split("```")[1].split("```")[0].strip()
 
-            return json.loads(content)
+            dir_info = json.loads(content)
+
+            # Validate that the tests_dir actually exists
+            if dir_info.get("tests_dir"):
+                test_path = self.repo_root / dir_info["tests_dir"]
+                if not test_path.exists():
+                    print(f"[AI Analyzer] Warning: AI suggested non-existent path: {dir_info['tests_dir']}")
+                    # Use first candidate we actually found
+                    if test_dir_candidates:
+                        print(f"[AI Analyzer] Using first discovered directory instead: {test_dir_candidates[0]['path']}")
+                        dir_info["tests_dir"] = test_dir_candidates[0]['path']
+                    else:
+                        dir_info["tests_dir"] = None
+
+            return dir_info
         except Exception as e:
             print(f"[AI Analyzer] Warning: Could not parse directory info: {e}")
+            # Fallback to first candidate if available
+            if test_dir_candidates:
+                print(f"[AI Analyzer] Using first discovered directory as fallback: {test_dir_candidates[0]['path']}")
+                return {"tests_dir": test_dir_candidates[0]['path'], "sequences_dir": None, "env_dir": None, "agents_dir": None}
             return {}
 
     def _analyze_tests(self, tests_dir: Optional[str]) -> list[UVMTest]:
@@ -264,29 +324,30 @@ Directory tree:
 ```
 
 IMPORTANT:
-- Include files that likely contain UVM test classes
-- Common patterns: *test*.sv, *Test*.sv, *case*.sv (some projects use "case" for tests)
-- EXCLUDE sequence files: *seq*.sv, *sequence*.sv
-- EXCLUDE package files: *pkg.sv, *package*.sv
-- EXCLUDE files in directories: "sequences", "virtual_sequences", "seq"
-- When in doubt, include the file (we'll verify it contains a test class later)
+- Include ANY .sv files that might contain UVM test classes
+- Test files can have ANY naming convention (PascalCase, snake_case, etc.):
+  - Examples: SpiDualSpiTypeTest.sv, apb_8b_write_test.sv, my_test_case.sv
+- EXCLUDE sequence files (contain "seq" or "sequence" in name or path)
+- EXCLUDE package files (*pkg.sv, *package*.sv)
+- EXCLUDE files in "sequences" or "seq" directories
+- When in doubt, include the file (we verify contents later)
 
-Return a JSON array of relative file paths.
-Example: ["test1.sv", "subdir/case2.sv", "another_test.sv"]
+Return a JSON array of ALL relative file paths that might be test classes.
+Example: ["SpiBaseTest.sv", "apb_test.sv", "test/my_case.sv"]
 """
 
         try:
-            response = self.client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[
-                    {"role": "system", "content": "You are an expert in UVM directory structures. Return only valid JSON."},
-                    {"role": "user", "content": prompt}
-                ],
+            response = self.client.messages.create(
+                model="claude-3-5-sonnet-20241022",
+                max_tokens=500,
                 temperature=0.1,
-                max_tokens=500
+                system="You are an expert in UVM directory structures. Return only valid JSON.",
+                messages=[
+                    {"role": "user", "content": prompt}
+                ]
             )
 
-            content = response.choices[0].message.content.strip()
+            content = response.content[0].text.strip()
             if "```json" in content:
                 content = content.split("```json")[1].split("```")[0].strip()
             elif "```" in content:
@@ -300,6 +361,11 @@ Example: ["test1.sv", "subdir/case2.sv", "another_test.sv"]
                 full_path = tests_path / fpath
                 if full_path.exists():
                     result.append(full_path)
+
+            # If AI returned empty list or no valid files, use fallback
+            if not result:
+                print(f"[AI Analyzer] No test files identified by AI, using directory glob")
+                return list(tests_path.glob("*.sv"))
 
             return result
 
@@ -342,24 +408,49 @@ Example: {{"class_name": "apb_8b_write_test", "base_class": "apb_base_test", "de
 """
 
         try:
-            response = self.client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[
-                    {"role": "system", "content": "You are an expert in SystemVerilog/UVM. Return only valid JSON."},
-                    {"role": "user", "content": prompt}
-                ],
+            response = self.client.messages.create(
+                model="claude-3-5-sonnet-20241022",
+                max_tokens=200,
                 temperature=0.1,
-                max_tokens=200
+                system="You are an expert in SystemVerilog/UVM. Return only valid JSON.",
+                messages=[
+                    {"role": "user", "content": prompt}
+                ]
             )
 
-            content = response.choices[0].message.content.strip()
+            content = response.content[0].text.strip()
             if "```json" in content:
                 content = content.split("```json")[1].split("```")[0].strip()
             elif "```" in content:
                 content = content.split("```")[1].split("```")[0].strip()
 
-            if content.lower() == "null":
+            if content.lower() == "null" or content.lower() == "none":
                 return None
+
+            # Clean up common JSON formatting issues
+            # Remove any text after the closing brace/bracket
+            if content.startswith('{'):
+                # Find the matching closing brace
+                brace_count = 0
+                for i, char in enumerate(content):
+                    if char == '{':
+                        brace_count += 1
+                    elif char == '}':
+                        brace_count -= 1
+                        if brace_count == 0:
+                            content = content[:i+1]
+                            break
+            elif content.startswith('['):
+                # Find the matching closing bracket
+                bracket_count = 0
+                for i, char in enumerate(content):
+                    if char == '[':
+                        bracket_count += 1
+                    elif char == ']':
+                        bracket_count -= 1
+                        if bracket_count == 0:
+                            content = content[:i+1]
+                            break
 
             info = json.loads(content)
 
@@ -530,43 +621,55 @@ Return ONLY a JSON object with ALL simulators found.
 Example: {{"build_system": "makefile", "simulators": ["questa", "xcelium", "vcs"]}}
 """
 
+        # Define mappings outside try block so they're available in except
+        build_sys_map = {
+            "makefile": BuildSystem.MAKEFILE,
+            "cmake": BuildSystem.CMAKE,
+            "fusesoc": BuildSystem.FUSESOC,
+            "dvsim": BuildSystem.DVSIM,
+            "custom": BuildSystem.CUSTOM
+        }
+
+        sim_map = {
+            "questa": Simulator.QUESTA,
+            "modelsim": Simulator.QUESTA,
+            "xcelium": Simulator.XCELIUM,
+            "irun": Simulator.XCELIUM,
+            "vcs": Simulator.VCS,
+            "verilator": Simulator.VERILATOR,
+            "dsim": Simulator.DSIM
+        }
+
         try:
-            response = self.client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[
-                    {"role": "system", "content": "You are an expert in EDA build systems. Return only valid JSON."},
-                    {"role": "user", "content": prompt}
-                ],
+            response = self.client.messages.create(
+                model="claude-3-5-sonnet-20241022",
+                max_tokens=200,
                 temperature=0.1,
-                max_tokens=200
+                system="You are an expert in EDA build systems. Return only valid JSON.",
+                messages=[
+                    {"role": "user", "content": prompt}
+                ]
             )
 
-            content = response.choices[0].message.content.strip()
+            content = response.content[0].text.strip()
             if "```json" in content:
                 content = content.split("```json")[1].split("```")[0].strip()
             elif "```" in content:
                 content = content.split("```")[1].split("```")[0].strip()
 
+            # Clean up JSON response - remove extra data after closing brace
+            if content.startswith('{'):
+                brace_count = 0
+                for i, char in enumerate(content):
+                    if char == '{':
+                        brace_count += 1
+                    elif char == '}':
+                        brace_count -= 1
+                        if brace_count == 0:
+                            content = content[:i+1]
+                            break
+
             info = json.loads(content)
-
-            # Convert to enums
-            build_sys_map = {
-                "makefile": BuildSystem.MAKEFILE,
-                "cmake": BuildSystem.CMAKE,
-                "fusesoc": BuildSystem.FUSESOC,
-                "dvsim": BuildSystem.DVSIM,
-                "custom": BuildSystem.CUSTOM
-            }
-
-            sim_map = {
-                "questa": Simulator.QUESTA,
-                "modelsim": Simulator.QUESTA,
-                "xcelium": Simulator.XCELIUM,
-                "irun": Simulator.XCELIUM,
-                "vcs": Simulator.VCS,
-                "verilator": Simulator.VERILATOR,
-                "dsim": Simulator.DSIM
-            }
 
             build_system = build_sys_map.get(info.get("build_system", "custom"), BuildSystem.CUSTOM)
             ai_simulators = [sim_map[s] for s in info.get("simulators", []) if s in sim_map]

@@ -11,20 +11,30 @@ Inspired by [SWE-smith](https://github.com/SWE-Smith/SWE-smith) and [SWE-Gym](ht
 
 DV-Smith is a **DV gym generator** that:
 
-- 📊 **Analyzes** UVM repositories using AI/static analysis to discover tests, sequences, and covergroups
+- 📊 **Analyzes** UVM repositories using AI to discover tests, sequences, and covergroups
 - 🏗️ **Builds** isolated verification tasks from existing testbenches
 - ⚖️ **Evaluates** solutions based on functional coverage, code coverage, and simulation health
 - 🔄 **Supports** multiple simulators: Xcelium, Questa/ModelSim, VCS, Verilator
 
 ### Key Features
 
-✨ **AI-Powered Analysis**: Uses GPT-4o-mini to understand any UVM repository structure
-🎯 **Automatic Task Generation**: Converts existing tests into isolated tasks
+✨ **Claude-Powered Analysis**: Uses Claude 3.5 Sonnet to understand any UVM repository structure
+🎯 **Automatic Task Generation**: Converts existing tests into isolated tasks with HOWTO guides
 📈 **Multi-Metric Evaluation**: Scores solutions on coverage and health metrics
 🔌 **Pluggable Simulator Support**: Extensible adapter system for any simulator
 🧪 **Comprehensive Testing**: Unit tests, integration tests, and real-world benchmarks
+📝 **Intelligent Gym Cleaning**: Uses Claude Code SDK to identify and preserve infrastructure files
 
 ## 🚀 Quick Start
+
+### Prerequisites
+
+- Python 3.8+
+- One or more EDA simulators:
+  - Cadence Xcelium
+  - Mentor Questa/ModelSim
+  - Synopsys VCS
+  - (Verilator support planned)
 
 ### Installation
 
@@ -32,14 +42,25 @@ DV-Smith is a **DV gym generator** that:
 git clone https://github.com/yourusername/dv-smith.git
 cd dv-smith
 
-# Install with uv (recommended) or pip
+# Install with uv (recommended)
+uv venv
+source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+uv pip install -e .
+
+# Or with pip
 python -m venv .venv
 source .venv/bin/activate
 pip install -e .
 
-# Optional: Set OpenAI API key for AI-powered analysis
-echo "OPENAI_API_KEY=your-key-here" > .env
+# Required: Set Anthropic API key for Claude-powered analysis
+echo "ANTHROPIC_API_KEY=your-key-here" > .env
 ```
+
+**Important Notes**:
+- The `ANTHROPIC_API_KEY` is **required** for repository analysis and task generation
+- Get your API key from: https://console.anthropic.com/settings/keys
+- Dependencies (`anthropic`, `claude-agent-sdk`, `python-dotenv`) are automatically installed
+- If the `dvsmith` command is not found, use `python -m dvsmith.cli` instead
 
 ### Create Your First DV Gym
 
@@ -52,16 +73,17 @@ dvsmith build apb_avip --sim xcelium
 
 # 3. Explore tasks
 ls dvsmith_workspace/gyms/apb_avip/tasks/
+# You'll see task_001_16b_read.md, task_008_8b_write.md, etc.
 
 # 4. Use sample agent to solve a task
 python examples/agents/simple_agent.py \
-    dvsmith_workspace/gyms/apb_avip/tasks/task_001_8b_write.md \
-    solutions/task_001
+    dvsmith_workspace/gyms/apb_avip/tasks/task_008_8b_write.md \
+    solutions/task_008
 
 # 5. Evaluate the solution
 dvsmith eval \
-    --task dvsmith_workspace/gyms/apb_avip/tasks/task_001_8b_write.md \
-    --patch solutions/task_001/solution.patch \
+    --task dvsmith_workspace/gyms/apb_avip/tasks/task_008_8b_write.md \
+    --patch solutions/task_008/solution.patch \
     --sim xcelium
 ```
 
@@ -88,8 +110,9 @@ DV-Smith Pipeline:
 ### Components
 
 **Core:**
-- `dvsmith/core/ai_analyzer.py` - AI-powered repository analysis
-- `dvsmith/core/task_generator.py` - Task specification generation
+- `dvsmith/core/ai_analyzer.py` - Claude-powered repository analysis (Claude 3.5 Sonnet)
+- `dvsmith/core/task_generator.py` - Claude-powered task generation (Claude 3.5 Sonnet)
+- `dvsmith/core/gym_cleaner.py` - Intelligent gym cleaning (Claude Code SDK)
 - `dvsmith/cli.py` - Command-line interface
 
 **Simulator Adapters:**
@@ -159,12 +182,12 @@ dvsmith eval --task gym/tasks/task_001.md --patch pr_changes.patch
 
 DV-Smith has been tested on public UVM AVIPs:
 
-| Benchmark | Tests | Sequences | Covergroups | Simulators | Status |
-|-----------|-------|-----------|-------------|------------|--------|
-| [APB AVIP](https://github.com/mbits-mirafra/apb_avip) | 24 | 16 | 2 | questa, vcs, xcelium | ✅ |
-| [AXI4 AVIP](https://github.com/mbits-mirafra/axi4_avip) | 50 | 42 | 5 | questa, vcs, xcelium | ✅ |
-| [I3C AVIP](https://github.com/mbits-mirafra/i3c_avip) | 47 | 38 | 3 | questa, vcs | ✅ |
-| [SPI AVIP](https://github.com/mbits-mirafra/spi_avip) | 25 | 24 | 4 | questa, vcs, xcelium | ✅ |
+| Benchmark | Tests Found | Tasks Generated | Covergroups | Simulators | Status |
+|-----------|-------------|-----------------|-------------|------------|--------|
+| [APB AVIP](https://github.com/mbits-mirafra/apb_avip) | 10 | 9 | 2 | questa, vcs, xcelium | ✅ |
+| [AXI4 AVIP](https://github.com/mbits-mirafra/axi4_avip) | 72 | 70 | 2 | xcelium, vcs, questa | ✅ |
+| [I3C AVIP](https://github.com/mbits-mirafra/i3c_avip) | TBD | TBD | TBD | questa, vcs | 🔄 |
+| [SPI AVIP](https://github.com/mbits-mirafra/spi_avip) | TBD | TBD | TBD | questa, vcs, xcelium | 🔄 |
 
 ## 🧪 Testing
 
@@ -193,20 +216,43 @@ pytest tests/ --cov=dvsmith --cov-report=html
 
 ```
 dvsmith_workspace/
+├── clones/                # Cloned repositories
+│   └── <bench_name>/
 ├── profiles/              # Repository profiles
 │   └── <bench_name>.yaml
-├── gyms/                  # Generated DV gyms
-│   └── <bench_name>/
-│       ├── repo/          # Stripped repository
-│       ├── tasks/         # Task specifications (*.md)
-│       ├── smoke_tests/   # Reference smoke tests
-│       └── README.md
-└── artifacts/             # Evaluation results (created later)
-    └── <task_id>/
-        ├── simulation.log
-        ├── coverage_db/
-        └── results.json
+└── gyms/                  # Generated DV gyms
+    └── <bench_name>/
+        ├── tasks/         # Task specifications (*.md)
+        ├── HOWTO.md       # Guide for adding new tests
+        ├── gym_metadata.yaml
+        ├── backups/       # Original test files (for reference)
+        ├── work/          # Evaluation artifacts
+        │   └── eval/
+        │       └── <task_id>/
+        │           ├── *.log
+        │           └── coverage files
+        ├── src/           # Source code (tests removed)
+        ├── sim/           # Simulation makefiles
+        └── ...            # Other repo files
 ```
+
+### Task Format
+
+Each task includes a **"Getting Started"** section that directs agents to read the `HOWTO.md` file:
+
+```markdown
+## Getting Started
+**IMPORTANT:** Before implementing your solution, read the `HOWTO.md` file in the gym root directory.
+It contains critical information about:
+- How to add tests to the package file (required for compilation)
+- UVM test structure and base classes
+- Common errors and how to fix them
+```
+
+The HOWTO.md guide is automatically generated for each gym and includes:
+- Step-by-step instructions for adding new UVM tests
+- Package file editing requirements (critical for test registration)
+- Common pitfalls and troubleshooting
 
 ### Profile Configuration
 
@@ -214,26 +260,52 @@ Profiles are automatically generated but can be customized:
 
 ```yaml
 name: apb_avip
-repo_path: https://github.com/mbits-mirafra/apb_avip
-commit: main
+repo_url: dvsmith_workspace/clones/apb_avip
+description: UVM testbench for apb_avip
+simulators:
+  - questa
+  - vcs
+  - xcelium
 
-tests:
-  - name: apb_8b_write_test
-    file: src/hvlTop/tb/test/apb_8b_write_test.sv
-    base_class: base_test
-
-sequences:
-  - name: apb_8b_write_seq
-    file: src/hvlTop/sequences/apb_8b_write_seq.sv
-
-covergroups:
-  - apb_master_coverage.apb_tx_cg
+paths:
+  root: .
+  tests: src/hvl_top/test
+  sequences: src/hvl_top/test/sequences
+  env: src/hvl_top/env
 
 build:
   xcelium:
     work_dir: sim/cadence_sim
     compile_cmd: make -C sim/cadence_sim compile
-    run_cmd: make -C sim/cadence_sim simulate TEST={test} SEED={seed}
+    run_cmd: make -C sim/cadence_sim simulate test={test} SEED={seed}
+
+coverage:
+  questa:
+    report_cmd: vcover report -details -output {output} {ucdb}
+    functional_covergroups:
+      - apb_master_coverage.apb_master_covergroup
+      - apb_slave_coverage.apb_slave_covergroup
+
+grading:
+  smoke_tests:
+    - apb_base_test
+  weights:
+    functional_coverage: 0.6
+    code_coverage: 0.3
+    health: 0.1
+  thresholds:
+    functional:
+      min_pct: 80.0
+      strategy: any_of
+    code:
+      statements_min_pct: 70.0
+      branches_min_pct: 60.0
+      toggles_min_pct: 50.0
+    health:
+      max_uvm_errors: 0
+      max_uvm_fatals: 0
+      max_scoreboard_errors: 0
+      all_assertions_pass: true
 ```
 
 ## 🤝 Contributing

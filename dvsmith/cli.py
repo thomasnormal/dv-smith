@@ -2,24 +2,29 @@
 """dv-smith CLI - Convert SystemVerilog/UVM testbenches into DV gyms."""
 
 import argparse
+import os
 import sys
 from pathlib import Path
 from typing import Optional
 
 import yaml
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 # Import adapters to trigger registration
 from .adapters.sim.base import SimulatorRegistry
 from .core.models import Simulator
-from .core.repo_analyzer import AnalyzerHints, RepoAnalyzer
 from .core.task_generator import TaskGenerator
 
-# AI analyzer is optional - requires openai package
+# AI analyzer is required
 try:
     from .core.ai_analyzer import AIRepoAnalyzer
-    HAS_AI = True
-except ImportError:
-    HAS_AI = False
+except ImportError as e:
+    print("[ERROR] Failed to import AI analyzer. Please install required dependencies:")
+    print("  pip install anthropic")
+    sys.exit(1)
 
 
 class DVSmith:
@@ -117,37 +122,29 @@ class DVSmith:
                 print(f"[ERROR] Repository not found: {repo_path}")
                 sys.exit(1)
 
-        # Try AI analyzer if available
-        analysis = None
-        if HAS_AI:
-            print("[dv-smith] Using AI-powered analysis...")
-            try:
-                ai_analyzer = AIRepoAnalyzer(repo_path)
-                analysis = ai_analyzer.analyze()
+        # Check for Anthropic API key
+        if not os.getenv("ANTHROPIC_API_KEY"):
+            print("[ERROR] ANTHROPIC_API_KEY environment variable is required")
+            print("[ERROR] Set it with: export ANTHROPIC_API_KEY=your-key-here")
+            print("[ERROR] Or add it to .env file")
+            sys.exit(1)
 
-                print(f"  ✓ Found {len(analysis.tests)} tests")
-                print(f"  ✓ Found {len(analysis.sequences)} sequences")
-                print(f"  ✓ Found {len(analysis.covergroups)} covergroups")
-                print(f"  ✓ Build system: {analysis.build_system}")
-                print(f"  ✓ Detected simulators: {[s.value for s in analysis.detected_simulators]}")
-
-            except Exception as e:
-                print(f"[WARNING] AI analysis failed: {e}")
-                print("[dv-smith] Falling back to static analyzer...")
-                analysis = None  # Fallback to static
-
-        if analysis is None:
-            print("[dv-smith] Using static analysis...")
-            # Fallback to static analyzer
-            analyzer = RepoAnalyzer(repo_path)
-            analysis = analyzer.analyze_static(AnalyzerHints())
-            analysis = analyzer.detect_build_system(analysis, AnalyzerHints())
+        # Use AI analyzer
+        print("[dv-smith] Using AI-powered analysis...")
+        try:
+            ai_analyzer = AIRepoAnalyzer(repo_path)
+            analysis = ai_analyzer.analyze()
 
             print(f"  ✓ Found {len(analysis.tests)} tests")
             print(f"  ✓ Found {len(analysis.sequences)} sequences")
             print(f"  ✓ Found {len(analysis.covergroups)} covergroups")
             print(f"  ✓ Build system: {analysis.build_system}")
             print(f"  ✓ Detected simulators: {[s.value for s in analysis.detected_simulators]}")
+
+        except Exception as e:
+            print(f"[ERROR] AI analysis failed: {e}")
+            print("[ERROR] Please check your ANTHROPIC_API_KEY and try again")
+            sys.exit(1)
 
         # Generate profile
         print("[dv-smith] Generating profile...")
@@ -194,8 +191,20 @@ class DVSmith:
 
         # Re-analyze to get test details (needed for task generation)
         print("[dv-smith] Re-analyzing repository...")
-        analyzer = RepoAnalyzer(repo_path)
-        analysis = analyzer.analyze_static(AnalyzerHints())
+
+        # Check for Anthropic API key
+        if not os.getenv("ANTHROPIC_API_KEY"):
+            print("[ERROR] ANTHROPIC_API_KEY environment variable is required")
+            print("[ERROR] Set it with: export ANTHROPIC_API_KEY=your-key-here")
+            sys.exit(1)
+
+        try:
+            ai_analyzer = AIRepoAnalyzer(repo_path)
+            analysis = ai_analyzer.analyze()
+        except Exception as e:
+            print(f"[ERROR] AI analysis failed: {e}")
+            print("[ERROR] Please check your ANTHROPIC_API_KEY and try again")
+            sys.exit(1)
 
         # Step 1: Copy source structure (including tests - we'll clean intelligently)
         print("[dv-smith] Step 1: Setting up gym structure...")

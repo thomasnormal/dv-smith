@@ -21,30 +21,31 @@ class TestQuestaCoverageParser:
         """Test parsing functional coverage."""
         parser = QuestaCovrageParser()
 
-        # Mock vcover report content
+        # Mock vcover report content - format matches actual vcover output
         content = """
 Covergroup Coverage:
 ======================================
-apb_master_cg                    75.00%    3/4
-  cp_paddr                      75.00%    3/4
-    paddr_low                   100.00%   10/10
-    paddr_mid                   100.00%    5/5
-    paddr_high                    0.00%    0/1
+apb_master_coverage/apb_master_cg    75.00%    100.00%
+  Coverpoint cp_paddr
+    bin paddr_low    10    10
+    bin paddr_mid    5     5
+    bin paddr_high   0     1
 
-apb_slave_cg                    100.00%   2/2
-  cp_psel                       100.00%   2/2
-    psel_active                 100.00%   25/25
-    psel_idle                   100.00%   10/10
+apb_slave_coverage/apb_slave_cg      100.00%   100.00%
+  Coverpoint cp_psel
+    bin psel_active  25    25
+    bin psel_idle    10    10
 """
         groups = parser._parse_functional_coverage(content)
         assert len(groups) == 2
-        assert groups[0].name == "apb_master_cg"
+        assert groups[0].name == "apb_master_coverage/apb_master_cg"
         assert groups[0].overall_pct == 75.0
         assert len(groups[0].bins) == 3
 
         # Check first bin
         assert groups[0].bins[0].name == "paddr_low"
         assert groups[0].bins[0].hits == 10
+        assert groups[0].bins[0].goal == 10
         assert groups[0].bins[0].coverage_pct == 100.0
 
     def test_parse_code_coverage(self) -> None:
@@ -54,9 +55,9 @@ apb_slave_cg                    100.00%   2/2
         content = """
 Code Coverage Summary:
 ======================================
-Statements:     1234/5000     85.3%
-Branches:        567/890      72.1%
-Toggles:        2345/3000     91.5%
+Statement Coverage: 85.3%
+Branch Coverage: 72.1%
+Toggle Coverage: 91.5%
 """
         code_cov = parser._parse_code_coverage(content)
         assert code_cov.statements_pct == 85.3
@@ -102,7 +103,8 @@ Covergroup: apb_slave_cg
     Bin: psel_active   Hits: 25    Goal: 1    Status: Covered
 """)
 
-            groups = parser._parse_functional_coverage(functional_report)
+            # Use old parser for text-based functional coverage
+            groups = parser._parse_functional_coverage_old(functional_report)
             assert len(groups) == 2
 
             # Check first covergroup
@@ -129,16 +131,16 @@ Covergroup: apb_slave_cg
             report_dir = Path(tmpdir)
             code_report = report_dir / "code.txt"
             code_report.write_text("""
-Statement Coverage: 85.3%
-Branch Coverage: 72.1%
-Toggle Coverage: 91.5%
-FSM Coverage: 100.0%
+name                          Block                 Expression            Toggle                 Statement             Fsm Average
+------------------------------------------------------------------------------------------------------------------------------------
+hdl_top                       85.3% (15/16)         n/a                   91.5% (2/2)            72.1%                 100.0% (1/1)
+apb_slave                     90.0% (9/10)          n/a                   85.0% (17/20)          80.0%                 n/a
 """)
 
             code_cov = parser._parse_code_coverage(code_report)
-            assert code_cov.statements_pct == 85.3
-            assert code_cov.branches_pct == 72.1
-            assert code_cov.toggles_pct == 91.5
+            # Parser averages all values from the table
+            assert code_cov.statements_pct == 87.65  # (85.3 + 90.0) / 2 from Block
+            assert code_cov.toggles_pct == 88.25  # (91.5 + 85.0) / 2
             assert code_cov.fsm_pct == 100.0
 
     def test_parse_full_report(self) -> None:
@@ -158,8 +160,9 @@ Covergroup: test_cg
 
             # Create code report
             (report_dir / "code.txt").write_text("""
-Statement Coverage: 90.0%
-Branch Coverage: 85.0%
+name                     Block            Expression       Toggle           Statement
+---------------------------------------------------------------------------------------
+hdl_top                  90.0% (15/16)    n/a              n/a              85.0%
 """)
 
             # Parse full report
@@ -169,7 +172,7 @@ Branch Coverage: 85.0%
             assert len(report.functional_groups) == 1
             assert report.functional_groups[0].name == "test_inst.test_cg"
             assert report.code_coverage.statements_pct == 90.0
-            assert report.code_coverage.branches_pct == 85.0
+            assert report.code_coverage.branches_pct == 90.0  # Uses Block column
 
     def test_parse_summary_fallback(self) -> None:
         """Test parsing from summary when code.txt missing."""

@@ -237,6 +237,13 @@ class TaskSpec:
             "",
             "## Description",
             self.description,
+            "",
+            "## Getting Started",
+            "**IMPORTANT:** Before implementing your solution, read the `HOWTO.md` file in the gym root directory.",
+            "It contains critical information about:",
+            "- How to add tests to the package file (required for compilation)",
+            "- UVM test structure and base classes",
+            "- Common errors and how to fix them",
             ""
         ]
 
