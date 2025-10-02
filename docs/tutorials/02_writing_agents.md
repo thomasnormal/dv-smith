@@ -50,9 +50,69 @@ Agents must produce:
 1. **Solution files**: SystemVerilog test/sequence files
 2. **Patch file**: Git diff showing changes
 
+## Claude SDK Agent (Recommended)
+
+The most powerful agent implementation uses the Claude Code SDK to autonomously generate UVM test code. See `examples/agents/claude_sdk_agent.py`:
+
+```python
+from claude_agent_sdk import ClaudeSDKClient, ClaudeAgentOptions
+
+class ClaudeSDKAgent:
+    """An agent that uses Claude Code SDK to generate UVM test code."""
+
+    def __init__(self, task_file: Path):
+        self.task_file = task_file
+        self.task_spec = self._parse_task()
+
+    async def generate_solution(self, output_dir: Path):
+        """Generate solution using Claude Code SDK."""
+        # Get gym root directory
+        gym_root = self.task_file.parent.parent.resolve()
+
+        # Configure SDK options
+        options = ClaudeAgentOptions(
+            allowed_tools=["Write", "Read", "Edit", "Glob"],
+            permission_mode="acceptEdits",
+            cwd=str(gym_root),
+            system_prompt={
+                "type": "preset",
+                "preset": "claude_code",
+                "append": "You are an expert UVM verification engineer."
+            }
+        )
+
+        # Generate solution
+        modified_files = []
+        async with ClaudeSDKClient(options=options) as client:
+            await client.query(self._build_prompt())
+
+            async for message in client.receive_response():
+                # Track file modifications
+                for block in message.content:
+                    if isinstance(block, ToolUseBlock):
+                        if block.name in ["Write", "Edit"]:
+                            file_path = block.input.get("file_path")
+                            modified_files.append(file_path)
+
+        return modified_files, gym_root
+```
+
+**Key Features:**
+- **Autonomous**: Claude reads HOWTO.md, edits package files, and creates tests
+- **Multi-file**: Can modify multiple files (test + package)
+- **Context-aware**: Understands UVM structure from repository
+- **Self-correcting**: Can iterate on solutions
+
+**Usage:**
+```bash
+python examples/agents/claude_sdk_agent.py \
+    gym/tasks/task_008_8b_write.md \
+    solutions/task_008
+```
+
 ## Simple Agent Example
 
-Here's a minimal agent (see `examples/agents/simple_agent.py`):
+Here's a minimal template-based agent:
 
 ```python
 #!/usr/bin/env python3
@@ -120,18 +180,18 @@ if __name__ == "__main__":
 
 ### 1. LLM-Powered Agents
 
-Use LLMs to generate more sophisticated solutions:
+Use Claude to generate sophisticated solutions:
 
 ```python
-from openai import OpenAI
+from anthropic import Anthropic
 
-class LLMAgent:
+class ClaudeLLMAgent:
     def __init__(self, task_file: Path):
-        self.client = OpenAI()
+        self.client = Anthropic()  # Reads ANTHROPIC_API_KEY from env
         self.task_spec = self._parse_task(task_file)
 
     def generate_solution(self, output_dir: Path) -> Path:
-        # Create prompt for LLM
+        # Create prompt for Claude
         prompt = f"""Generate a SystemVerilog UVM test for:
 Goal: {self.task_spec['goal']}
 Hints: {', '.join(self.task_spec['hints'])}
@@ -141,17 +201,22 @@ Requirements:
 - Use proper UVM phases
 - Create and configure sequences based on hints
 - Add appropriate UVM messaging
+- Include proper include guards
 """
 
-        response = self.client.chat.completions.create(
-            model="gpt-4",
+        response = self.client.messages.create(
+            model="claude-3-5-sonnet-20241022",
+            max_tokens=4096,
             messages=[
-                {"role": "system", "content": "You are an expert UVM verification engineer."},
-                {"role": "user", "content": prompt}
-            ]
+                {
+                    "role": "user",
+                    "content": prompt
+                }
+            ],
+            system="You are an expert UVM verification engineer with deep knowledge of SystemVerilog and UVM methodology."
         )
 
-        code = response.choices[0].message.content
+        code = response.content[0].text
 
         # Extract code from markdown if present
         if '```systemverilog' in code:
@@ -161,6 +226,8 @@ Requirements:
         test_file.write_text(code)
         return test_file
 ```
+
+**Note**: For even better results, use the **Claude SDK Agent** (above) which can autonomously read repository context and make multi-file edits.
 
 ### 2. Template-Based Agents
 
@@ -485,11 +552,33 @@ dvsmith eval \
 
 ## Example: Complete Agent
 
-See `examples/agents/simple_agent.py` for a complete working example that:
-- Parses task specifications
-- Generates UVM test code
-- Creates patch files
-- Provides helpful output
+See `examples/agents/claude_sdk_agent.py` for a complete working example that:
+- Parses task specifications with regex
+- Uses Claude Code SDK for autonomous code generation
+- Reads HOWTO.md and follows repository conventions
+- Modifies multiple files (test + package files)
+- Creates git patch files
+- Tracks all file modifications
+- Provides detailed progress output
+
+**Quick Start:**
+```bash
+# Make sure ANTHROPIC_API_KEY is set
+export ANTHROPIC_API_KEY=your-key-here
+
+# Run the Claude SDK agent
+python examples/agents/claude_sdk_agent.py \
+    dvsmith_workspace/gyms/apb_avip/tasks/task_008_8b_write.md \
+    solutions/task_008
+
+# Output:
+#   [Claude SDK Agent] Generating solution using Claude Code...
+#   [Claude SDK Agent] Working in gym directory: /path/to/gym
+#   [Claude SDK Agent] Claude created: src/hvl_top/test/apb_8b_write_test.sv
+#   [Claude SDK Agent] Claude edited: src/hvl_top/test/apb_test_pkg.sv
+#   [Claude SDK Agent] Modified 2 file(s)
+#   [Claude SDK Agent] Created patch: solutions/task_008/solution.patch
+```
 
 ## Next Steps
 

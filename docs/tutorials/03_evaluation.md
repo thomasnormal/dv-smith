@@ -61,9 +61,14 @@ dvsmith eval --task <task.md> --patch <solution.patch> --sim xcelium
 - FSM coverage (if present)
 
 **Coverage Database Locations:**
-- Xcelium: `cov_work/`
-- Questa: `*.ucdb`
-- VCS: `simv.vdb/`
+- Xcelium: `cov_work/` (IMC database with `functional.txt` and `code.txt` reports)
+- Questa: `*.ucdb` (UCDB database)
+- VCS: `simv.vdb/` (VDB database)
+
+**Xcelium Coverage Parsing:**
+- Primary: Parses `code.txt` and `functional.txt` from IMC reports
+- Fallback: If `code.txt` is missing, parses `summary.txt` for code coverage metrics
+- This ensures coverage data is extracted even when detailed reports aren't available
 
 ### 5. Parse Health Metrics
 

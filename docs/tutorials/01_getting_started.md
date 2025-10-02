@@ -15,7 +15,7 @@ DV-Smith automates the process of:
 
 - Python 3.8+
 - Git
-- (Optional) OpenAI API key for AI-powered analysis
+- Anthropic API key (required for AI-powered analysis)
 - (Optional) Simulators: Questa/ModelSim, Xcelium, VCS, or Verilator
 
 ### Install DV-Smith
@@ -25,14 +25,21 @@ DV-Smith automates the process of:
 git clone https://github.com/yourusername/dv-smith.git
 cd dv-smith
 
-# Create virtual environment and install dependencies
-python -m venv .venv
+# Install with uv (recommended)
+uv venv
 source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+uv pip install -e .
+
+# Or with pip
+python -m venv .venv
+source .venv/bin/activate
 pip install -e .
 
-# Optional: Set up OpenAI API key for AI analysis
-echo "OPENAI_API_KEY=your-key-here" > .env
+# Required: Set up Anthropic API key for Claude-powered analysis
+echo "ANTHROPIC_API_KEY=your-key-here" > .env
 ```
+
+**Important**: Get your API key from https://console.anthropic.com/settings/keys. The API key is **required** for repository analysis and task generation using Claude 3.5 Sonnet.
 
 ## Quick Start
 
@@ -49,7 +56,8 @@ dvsmith ingest /path/to/local/repo --name my_bench
 ```
 
 **What happens during ingest:**
-- AI analyzer (or static analyzer) discovers UVM tests, sequences, covergroups
+- Claude 3.5 Sonnet analyzes the UVM repository structure
+- Discovers tests, sequences, covergroups, and base classes
 - Detects build system (Makefile, CMake, etc.)
 - Identifies supported simulators
 - Creates a profile YAML file in `dvsmith_workspace/profiles/`
@@ -57,12 +65,12 @@ dvsmith ingest /path/to/local/repo --name my_bench
 **Example output:**
 ```
 [dv-smith] Ingesting repository: https://github.com/mbits-mirafra/apb_avip
-[dv-smith] Using AI-powered analysis...
+[dv-smith] Using Claude 3.5 Sonnet for AI-powered analysis...
 [AI Analyzer] Gathering repository structure...
 [AI Analyzer] Identifying key directories...
 [AI Analyzer] Analyzing test files...
-[AI Analyzer] Found 24 tests
-[AI Analyzer] Found 16 sequences
+[AI Analyzer] Found 10 tests
+[AI Analyzer] Found 12 sequences
 [AI Analyzer] Found 2 covergroups
 [AI Analyzer] Detected simulators: ['questa', 'vcs', 'xcelium']
 [dv-smith] Profile saved to: dvsmith_workspace/profiles/apb_avip.yaml
@@ -205,15 +213,15 @@ dvsmith build spi
 ### Workflow 2: Automated Agent Testing
 
 ```bash
-# Use the sample agent
-python examples/agents/simple_agent.py \
-    dvsmith_workspace/gyms/apb_avip/tasks/task_001_8b_write.md \
-    solutions/task_001
+# Use the Claude SDK agent (autonomous code generation)
+python examples/agents/claude_sdk_agent.py \
+    dvsmith_workspace/gyms/apb_avip/tasks/task_008_8b_write.md \
+    solutions/task_008
 
 # Evaluate the agent's solution
 dvsmith eval \
-    --task dvsmith_workspace/gyms/apb_avip/tasks/task_001_8b_write.md \
-    --patch solutions/task_001/solution.patch \
+    --task dvsmith_workspace/gyms/apb_avip/tasks/task_008_8b_write.md \
+    --patch solutions/task_008/solution.patch \
     --sim xcelium
 ```
 
@@ -269,8 +277,8 @@ You can manually edit profiles to customize paths and commands.
 ### Environment Variables
 
 ```bash
-# Required for AI-powered analysis
-OPENAI_API_KEY=your-key-here
+# Required for AI-powered analysis (Claude 3.5 Sonnet)
+ANTHROPIC_API_KEY=your-key-here
 
 # Optional: Simulator paths (if not in PATH)
 QUESTA_HOME=/path/to/questa
@@ -281,13 +289,19 @@ XCELIUM_HOME=/path/to/xcelium
 
 ### Issue: AI Analyzer Times Out
 
-**Solution**: Use static analyzer fallback or increase timeout:
+**Solution**: Check your API key and network connection:
 ```bash
-# The tool automatically falls back to static analysis if AI fails
-# You can also skip AI by removing OPENAI_API_KEY
-unset OPENAI_API_KEY
-dvsmith ingest /path/to/repo --name my_bench
+# Verify API key is set correctly
+echo $ANTHROPIC_API_KEY
+
+# Check if key is in .env file
+cat .env | grep ANTHROPIC_API_KEY
+
+# Test API connectivity
+python -c "from anthropic import Anthropic; client = Anthropic(); print('API OK')"
 ```
+
+**Note**: The AI analyzer requires a valid Anthropic API key. Unlike some other tools, DV-Smith does not have a static fallback - AI analysis is essential for accurate repository understanding.
 
 ### Issue: No Tests Found
 

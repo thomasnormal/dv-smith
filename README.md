@@ -57,8 +57,9 @@ echo "ANTHROPIC_API_KEY=your-key-here" > .env
 ```
 
 **Important Notes**:
-- The `ANTHROPIC_API_KEY` is **required** for repository analysis and task generation
+- The `ANTHROPIC_API_KEY` is **required** for AI-powered repository analysis and task generation
 - Get your API key from: https://console.anthropic.com/settings/keys
+- Uses Claude 3.5 Sonnet for intelligent code analysis
 - Dependencies (`anthropic`, `claude-agent-sdk`, `python-dotenv`) are automatically installed
 - If the `dvsmith` command is not found, use `python -m dvsmith.cli` instead
 
@@ -75,8 +76,8 @@ dvsmith build apb_avip --sim xcelium
 ls dvsmith_workspace/gyms/apb_avip/tasks/
 # You'll see task_001_16b_read.md, task_008_8b_write.md, etc.
 
-# 4. Use sample agent to solve a task
-python examples/agents/simple_agent.py \
+# 4. Use Claude SDK agent to solve a task (requires ANTHROPIC_API_KEY)
+python examples/agents/claude_sdk_agent.py \
     dvsmith_workspace/gyms/apb_avip/tasks/task_008_8b_write.md \
     solutions/task_008
 
@@ -186,8 +187,10 @@ DV-Smith has been tested on public UVM AVIPs:
 |-----------|-------------|-----------------|-------------|------------|--------|
 | [APB AVIP](https://github.com/mbits-mirafra/apb_avip) | 10 | 9 | 2 | questa, vcs, xcelium | ✅ |
 | [AXI4 AVIP](https://github.com/mbits-mirafra/axi4_avip) | 72 | 70 | 2 | xcelium, vcs, questa | ✅ |
-| [I3C AVIP](https://github.com/mbits-mirafra/i3c_avip) | TBD | TBD | TBD | questa, vcs | 🔄 |
-| [SPI AVIP](https://github.com/mbits-mirafra/spi_avip) | TBD | TBD | TBD | questa, vcs, xcelium | 🔄 |
+| [I3C AVIP](https://github.com/mbits-mirafra/i3c_avip) | 8 | 6 | 2 | questa, vcs, xcelium | ✅ |
+| [SPI AVIP](https://github.com/mbits-mirafra/spi_avip) | TBD | TBD | TBD | questa, vcs, xcelium | ⚠️ |
+
+*Note: SPI AVIP gym build has known issues with AI hint generation.*
 
 ## 🧪 Testing
 
@@ -205,10 +208,11 @@ pytest tests/ --cov=dvsmith --cov-report=html
 ```
 
 **Test Results:**
-- ✅ 21/23 unit tests passing (91%)
-- ✅ 4/4 integration tests passing (100%)
-- ✅ Xcelium adapter fully tested
-- ✅ Coverage parsers validated
+- ✅ 32/32 tests passing (100%)
+- ✅ Unit tests: models, coverage parsers
+- ✅ Integration tests: AI analyzer, task generator, simulators
+- ✅ Xcelium adapter with summary fallback fully tested
+- ✅ Coverage parsers validated (Questa + Xcelium)
 
 ## 🔧 Configuration
 
@@ -343,7 +347,7 @@ MIT License - see [LICENSE](LICENSE) file for details.
 - [x] Task generator with markdown format
 - [x] Validation and evaluation harnesses
 - [x] Comprehensive unit and integration tests
-- [x] Sample agent implementation
+- [x] Claude SDK agent implementation (autonomous code generation)
 - [x] Complete documentation and tutorials
 - [ ] VCS simulator adapter
 - [ ] Verilator adapter with coverage
