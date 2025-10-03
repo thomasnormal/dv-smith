@@ -20,6 +20,7 @@ from .models import (
     AcceptanceCriteria,
     RepoAnalysis,
     Simulator,
+    TaskCategory,
     TaskLevel,
     TaskSpec,
     UVMTest,
@@ -43,7 +44,7 @@ class TaskGenerator:
 
     def generate_tasks(self, output_dir: Path,
                       smoke_tests: Optional[list[str]] = None) -> list[TaskSpec]:
-        """Generate task specifications for all tests.
+        """Generate task specifications for all tests (backward compatible).
 
         Args:
             output_dir: Directory to write task markdown files
@@ -52,34 +53,64 @@ class TaskGenerator:
         Returns:
             List of generated TaskSpec objects
         """
+        # Backward compatible: generate only STIMULUS tasks
+        return self.generate_tasks_multi(
+            output_dir=output_dir,
+            modes=[TaskCategory.STIMULUS],
+            smoke_tests=smoke_tests
+        )
+
+    def generate_tasks_multi(
+        self,
+        output_dir: Path,
+        modes: list[TaskCategory],
+        smoke_tests: Optional[list[str]] = None,
+        max_coverage_tasks: int = 12
+    ) -> list[TaskSpec]:
+        """Generate tasks across multiple categories.
+
+        Args:
+            output_dir: Directory to write task markdown files
+            modes: List of TaskCategory to generate
+            smoke_tests: Tests to exclude for stimulus tasks
+            max_coverage_tasks: Limit on number of coverage tasks
+
+        Returns:
+            List of generated TaskSpec objects
+        """
         output_dir.mkdir(exist_ok=True, parents=True)
         smoke_tests = smoke_tests or []
 
-        tasks = []
-        task_id = 1
+        tasks: list[TaskSpec] = []
+        seq = 1
 
-        for test in self.analysis.tests:
-            # Skip smoke tests
-            if test.name in smoke_tests:
-                continue
+        # Stimulus / Test creation
+        if TaskCategory.STIMULUS in modes:
+            for test in self.analysis.tests:
+                if test.name in smoke_tests:
+                    continue
+                if "base" in test.name.lower():
+                    continue
+                task = self._create_task_for_test(test, seq)
+                task.category = TaskCategory.STIMULUS
+                tasks.append(task)
+                task_file = output_dir / f"task_{seq:03d}_{self._slug(task.id)}.md"
+                task_file.write_text(task.to_markdown())
+                print(f"[TaskGen] Generated: {task_file.name}")
+                seq += 1
 
-            # Skip base classes
-            if "base" in test.name.lower():
-                continue
+        # Functional coverage closure tasks
+        if TaskCategory.COVERAGE_FUNC in modes:
+            cov_tasks = self._generate_functional_coverage_tasks(max_coverage_tasks)
+            for t in cov_tasks:
+                t.category = TaskCategory.COVERAGE_FUNC
+                task_file = output_dir / f"task_{seq:03d}_{self._slug(t.id)}.md"
+                task_file.write_text(t.to_markdown())
+                tasks.append(t)
+                print(f"[TaskGen] Generated: {task_file.name}")
+                seq += 1
 
-            # Generate task spec
-            task = self._create_task_for_test(test, task_id)
-            tasks.append(task)
-
-            # Write markdown file
-            task_file = output_dir / f"task_{task_id:03d}_{task.id}.md"
-            task_file.write_text(task.to_markdown())
-
-            print(f"[TaskGen] Generated: {task_file.name}")
-
-            task_id += 1
-
-        print(f"[TaskGen] Generated {len(tasks)} tasks")
+        print(f"[TaskGen] Generated {len(tasks)} tasks across categories: {', '.join(m.value for m in modes)}")
         return tasks
 
     def _create_task_for_test(self, test: UVMTest, task_id: int) -> TaskSpec:
@@ -469,3 +500,106 @@ Hints should mention:
         except Exception as e:
             print(f"[TaskGen] Warning: Hints generation failed for {test.name}: {e}")
             return []
+
+    def _generate_functional_coverage_tasks(self, max_tasks: int) -> list[TaskSpec]:
+        """Create functional coverage tasks from discovered or configured covergroups."""
+        groups: list[str] = []
+
+        # Prefer discovered covergroups
+        if self.analysis.covergroups:
+            groups = list(dict.fromkeys(self.analysis.covergroups))  # preserve order, dedup
+        else:
+            # Fallback to profile config if available
+            groups = self._configured_covergroups()
+
+        if not groups:
+            print("[TaskGen] No covergroups discovered or configured; skipping coverage tasks")
+            return []
+
+        # Limit number of tasks
+        groups = groups[:max_tasks]
+
+        # Pull thresholds/weights
+        grading = self.config.get("grading", {})
+        thresholds = grading.get("thresholds", {})
+        func_cfg = thresholds.get("functional", {})
+        min_pct = float(func_cfg.get("min_pct", 80.0))
+        strategy = func_cfg.get("strategy", "any_of")
+        weights_cfg = grading.get("weights", {})
+
+        supported_sims = self._get_supported_simulators()
+
+        tasks: list[TaskSpec] = []
+        for g in groups:
+            display = g
+            slug = self._slug(f"cov_{g}")
+            name = f"Functional Coverage: {display}"
+            description = (
+                f"Increase functional coverage for the covergroup `{display}` by creating or adapting "
+                f"stimulus and sequences that exercise its key scenarios. Focus on meaningful variation "
+                f"and corner-cases relevant to the protocol."
+            )
+            goal = (
+                f"Achieve at least {min_pct:.0f}% coverage in `{display}` while keeping the testbench healthy "
+                f"(no UVM errors/fatals or scoreboard errors)."
+            )
+
+            acceptance = AcceptanceCriteria(
+                functional_bins=[display],
+                functional_min_pct=min_pct,
+                functional_strategy=strategy,
+                code_statements_min_pct=thresholds.get("code", {}).get("statements_min_pct", 70.0),
+                code_branches_min_pct=thresholds.get("code", {}).get("branches_min_pct", 60.0),
+                code_toggles_min_pct=thresholds.get("code", {}).get("toggles_min_pct", 50.0),
+                max_scoreboard_errors=thresholds.get("health", {}).get("max_scoreboard_errors", 0),
+                max_uvm_errors=thresholds.get("health", {}).get("max_uvm_errors", 0),
+                max_uvm_fatals=thresholds.get("health", {}).get("max_uvm_fatals", 0),
+                all_assertions_pass=thresholds.get("health", {}).get("all_assertions_pass", True),
+                weights={
+                    "functional_coverage": weights_cfg.get("functional_coverage", 0.6),
+                    "code_coverage": weights_cfg.get("code_coverage", 0.3),
+                    "health": weights_cfg.get("health", 0.1)
+                }
+            )
+
+            task = TaskSpec(
+                id=slug,
+                name=name,
+                level=TaskLevel.MEDIUM,  # default; could be inferred later
+                bench_name=self.config.get("name", "unknown"),
+                description=description,
+                goal=goal,
+                acceptance=acceptance,
+                category=TaskCategory.COVERAGE_FUNC,
+                hints=[
+                    "Use constrained-random sequences to explore corner cases.",
+                    "Tweak sequence configuration knobs (burst types, alignment, lengths, inter-packet gaps).",
+                    "Leverage virtual sequences to orchestrate concurrent traffic if applicable.",
+                ],
+                original_test_files=[],  # no single 'original' test maps to a coverage group
+                supported_simulators=supported_sims,
+                notes=None
+            )
+            tasks.append(task)
+
+        return tasks
+
+    def _configured_covergroups(self) -> list[str]:
+        """Read covergroups from profile config for fallback coverage tasks."""
+        cov = self.config.get("coverage", {})
+        # First check a simulator-scoped section, then a generic key.
+        groups = []
+        for key in ("questa", "xcelium", "vcs"):
+            groups = cov.get(key, {}).get("functional_covergroups", [])
+            if groups:
+                break
+        if not groups:
+            groups = cov.get("functional_covergroups", [])
+        return list(groups) if isinstance(groups, list) else []
+
+    def _slug(self, text: str) -> str:
+        """Normalize a string for safe IDs/filenames."""
+        slug = text.lower()
+        slug = slug.replace(" ", "_").replace("/", "_").replace("\\", "_").replace(".", "_")
+        slug = re.sub(r"[^a-z0-9_\.-]", "", slug)
+        return slug.strip("._")

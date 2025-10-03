@@ -285,6 +285,89 @@ QUESTA_HOME=/path/to/questa
 XCELIUM_HOME=/path/to/xcelium
 ```
 
+## AI Transparency & Debugging
+
+DV-Smith provides full visibility into AI operations to help you understand and debug the analysis process.
+
+### Viewing AI Call Logs
+
+All AI interactions are automatically logged to `~/.dvsmith/ai_calls.jsonl`. You can view these logs using the `ai-logs` command:
+
+```bash
+# View recent AI calls (last 10 by default)
+dvsmith ai-logs
+
+# Show more entries
+dvsmith ai-logs --tail 20
+
+# Show full details including prompts and responses
+dvsmith ai-logs --tail 5 --full
+```
+
+**What's logged:**
+- Timestamp of each AI call
+- Response model type (TestInfo, DirectoryInfo, BuildInfo, etc.)
+- Call duration in milliseconds
+- Success/error status
+- Complete prompts and responses (with --full flag)
+
+**Example output:**
+```
+[dv-smith] AI call logs: /home/user/.dvsmith/ai_calls.jsonl
+
+[1] 2025-10-03T10:03:10.044668
+    Model: TestInfo
+    Duration: 14601ms
+    Status: ✓ Success
+
+[2] 2025-10-03T10:03:35.238062
+    Model: TestFileList
+    Duration: 19051ms
+    Status: ✓ Success
+```
+
+### Understanding File Identification
+
+During the ingest process, DV-Smith shows exactly which test files the AI identifies:
+
+```
+[AI Analyzer] Analyzing test files...
+[AI Analyzer] AI identified 10 test files:
+  - dvsmith_workspace/clones/apb_avip/src/hvl_top/test/apb_16b_read_test.sv
+  - dvsmith_workspace/clones/apb_avip/src/hvl_top/test/apb_16b_write_test.sv
+  - dvsmith_workspace/clones/apb_avip/src/hvl_top/test/apb_24b_write_test.sv
+  - dvsmith_workspace/clones/apb_avip/src/hvl_top/test/apb_32b_write_test.sv
+  ...
+```
+
+This transparency helps you:
+- Verify that the AI correctly identified all test files
+- Debug issues when tests are missing or incorrectly classified
+- Understand the AI's decision-making process
+- Track performance and identify slow API calls
+
+### Debugging AI Analysis Issues
+
+If the AI analysis produces unexpected results:
+
+1. **Check the logs** to see what the AI identified:
+   ```bash
+   dvsmith ai-logs --tail 20 --full
+   ```
+
+2. **Look for errors** in the log entries:
+   ```bash
+   grep -i error ~/.dvsmith/ai_calls.jsonl
+   ```
+
+3. **Verify API key** is working correctly:
+   ```bash
+   echo $ANTHROPIC_API_KEY
+   python -c "from anthropic import Anthropic; Anthropic().messages.create(model='claude-3-5-sonnet-20241022', max_tokens=10, messages=[{'role':'user','content':'test'}])"
+   ```
+
+4. **Review response models** to understand what data the AI returned
+
 ## Troubleshooting
 
 ### Issue: AI Analyzer Times Out

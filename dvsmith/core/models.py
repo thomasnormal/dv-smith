@@ -26,6 +26,14 @@ class BuildSystem(str, Enum):
     CUSTOM = "custom"
 
 
+class TaskCategory(str, Enum):
+    """High-level task categories."""
+    # Current supported categories
+    STIMULUS = "stimulus"              # Create/modify UVM tests and sequences
+    COVERAGE_FUNC = "coverage_func"    # Increase functional coverage / hit bins
+    # Future categories could include: COVERAGE_CODE, ASSERTION, CHECKER, ENV, BUILD, LINT, MUTATION
+
+
 class TaskLevel(str, Enum):
     """Task difficulty levels."""
     EASY = "easy"
@@ -217,6 +225,7 @@ class TaskSpec:
     description: str
     goal: str
     acceptance: AcceptanceCriteria
+    category: TaskCategory = TaskCategory.STIMULUS
     hints: list[str] = field(default_factory=list)
     original_test_files: list[Path] = field(default_factory=list)
     supported_simulators: list[Simulator] = field(default_factory=list)
@@ -228,6 +237,7 @@ class TaskSpec:
             f"# Task: {self.name}",
             "",
             f"**ID:** `{self.id}`  ",
+            f"**Category:** {self.category.value}  ",
             f"**Level:** {self.level.value}  ",
             f"**Bench:** {self.bench_name}  ",
             f"**Simulators:** {', '.join(s.value for s in self.supported_simulators)}",
@@ -327,6 +337,7 @@ class TaskSpec:
         # Extract basic fields
         task_name = ""
         task_id = ""
+        category = TaskCategory.STIMULUS
         level = TaskLevel.MEDIUM
         bench_name = ""
         simulators = []
@@ -339,6 +350,11 @@ class TaskSpec:
                 match = re.search(r"\*\*ID:\*\*\s*`([^`]+)`", line)
                 if match:
                     task_id = match.group(1)
+            elif "**Category:**" in line:
+                match = re.search(r"\*\*Category:\*\*\s*([A-Za-z_]+)", line)
+                if match:
+                    with contextlib.suppress(ValueError):
+                        category = TaskCategory(match.group(1).strip())
             elif "**Level:**" in line:
                 match = re.search(r"\*\*Level:\*\*\s*(\w+)", line)
                 if match:
@@ -395,6 +411,7 @@ class TaskSpec:
             description=description or "",
             goal=goal or "",
             acceptance=acceptance,
+            category=category,
             hints=hints,
             original_test_files=original_files,
             supported_simulators=simulators,

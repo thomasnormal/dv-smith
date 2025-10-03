@@ -24,6 +24,7 @@ DV-Smith is a **DV gym generator** that:
 🔌 **Pluggable Simulator Support**: Extensible adapter system for any simulator
 🧪 **Comprehensive Testing**: Unit tests, integration tests, and real-world benchmarks
 📝 **Intelligent Gym Cleaning**: Uses Claude Code SDK to identify and preserve infrastructure files
+🔍 **AI Transparency**: Complete logging of all AI calls with debugging tools (`dvsmith ai-logs`)
 
 ## 🚀 Quick Start
 
@@ -87,6 +88,46 @@ dvsmith eval \
     --patch solutions/task_008/solution.patch \
     --sim xcelium
 ```
+
+## 🔍 AI Transparency & Debugging
+
+DV-Smith provides full transparency into AI operations with built-in logging and debugging tools.
+
+### View AI Call Logs
+
+All AI interactions are automatically logged to `~/.dvsmith/ai_calls.jsonl`:
+
+```bash
+# View recent AI calls (last 10 by default)
+dvsmith ai-logs
+
+# Show more entries
+dvsmith ai-logs --tail 20
+
+# Show full details (prompts and responses)
+dvsmith ai-logs --tail 5 --full
+```
+
+**Log Information:**
+- Timestamp of each AI call
+- Response model used (TestInfo, DirectoryInfo, BuildInfo, etc.)
+- Call duration in milliseconds
+- Success/error status
+- Full prompts and responses (with --full flag)
+
+### AI File Identification
+
+During ingestion, DV-Smith displays exactly which files the AI identifies:
+
+```
+[AI Analyzer] AI identified 10 test files:
+  - dvsmith_workspace/clones/apb_avip/src/hvl_top/test/apb_16b_read_test.sv
+  - dvsmith_workspace/clones/apb_avip/src/hvl_top/test/apb_16b_write_test.sv
+  - dvsmith_workspace/clones/apb_avip/src/hvl_top/test/apb_24b_write_test.sv
+  ...
+```
+
+This helps you understand and verify the AI's analysis decisions.
 
 ## 📚 Documentation
 
@@ -349,6 +390,7 @@ MIT License - see [LICENSE](LICENSE) file for details.
 - [x] Comprehensive unit and integration tests
 - [x] Claude SDK agent implementation (autonomous code generation)
 - [x] Complete documentation and tutorials
+- [x] AI transparency and debugging (call logging, file identification display)
 - [ ] VCS simulator adapter
 - [ ] Verilator adapter with coverage
 - [ ] Docker containerization for reproducibility

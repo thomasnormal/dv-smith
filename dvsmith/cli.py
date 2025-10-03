@@ -157,12 +157,13 @@ class DVSmith:
         print(f"[dv-smith] Profile saved: {profile_path}")
         print("[dv-smith] Ingest complete!")
 
-    def build(self, name: str, simulators: Optional[list[str]] = None) -> None:
+    def build(self, name: str, simulators: Optional[list[str]] = None, task_types: str = "stimulus") -> None:
         """Build a gym from a profile.
 
         Args:
             name: Name of the gym/profile
             simulators: List of simulators to support (default: all in profile)
+            task_types: Comma-separated task types: stimulus, coverage_func, all
         """
         print(f"[dv-smith] Building gym: {name}")
 
@@ -260,9 +261,29 @@ class DVSmith:
         tasks_dir = gym_dir / "tasks"
         tasks_dir.mkdir(exist_ok=True)
 
+        # Parse task types
+        from .core.models import TaskCategory
+        selected_categories = []
+        for token in task_types.split(","):
+            tok = token.strip().lower()
+            if tok in ("stimulus", "tests", "test"):
+                if TaskCategory.STIMULUS not in selected_categories:
+                    selected_categories.append(TaskCategory.STIMULUS)
+            elif tok in ("coverage", "coverage_func", "func_cov", "functional"):
+                if TaskCategory.COVERAGE_FUNC not in selected_categories:
+                    selected_categories.append(TaskCategory.COVERAGE_FUNC)
+            elif tok in ("all",):
+                selected_categories = [TaskCategory.STIMULUS, TaskCategory.COVERAGE_FUNC]
+                break
+            else:
+                print(f"[WARNING] Unknown task type: {token}, skipping")
+
+        if not selected_categories:
+            selected_categories = [TaskCategory.STIMULUS]  # default
+
         task_gen = TaskGenerator(analysis, profile)
         smoke_tests = profile.get("grading", {}).get("smoke_tests", [])
-        tasks = task_gen.generate_tasks(tasks_dir, smoke_tests=smoke_tests)
+        tasks = task_gen.generate_tasks_multi(tasks_dir, modes=selected_categories, smoke_tests=smoke_tests)
 
         print(f"  Generated {len(tasks)} tasks")
 
@@ -521,6 +542,73 @@ class DVSmith:
         else:
             print("  (none detected)")
 
+    def show_ai_logs(self, tail: int = 10, full: bool = False) -> None:
+        """Show AI call logs.
+
+        Args:
+            tail: Number of recent entries to show (default: 10)
+            full: Show full log content instead of summary
+        """
+        from .core.ai_structured import AI_LOG_FILE
+        import json
+
+        if not AI_LOG_FILE.exists():
+            print(f"[dv-smith] No AI logs found at: {AI_LOG_FILE}")
+            return
+
+        print(f"[dv-smith] AI call logs: {AI_LOG_FILE}")
+        print()
+
+        # Read all log entries
+        entries = []
+        with AI_LOG_FILE.open() as f:
+            for line in f:
+                try:
+                    entries.append(json.loads(line))
+                except json.JSONDecodeError:
+                    continue
+
+        if not entries:
+            print("[dv-smith] No log entries found")
+            return
+
+        # Show last N entries
+        recent_entries = entries[-tail:] if tail > 0 else entries
+
+        for i, entry in enumerate(recent_entries, 1):
+            timestamp = entry.get("timestamp", "unknown")
+            model = entry.get("response_model", "unknown")
+            duration = entry.get("duration_ms", 0)
+            error = entry.get("error")
+
+            print(f"[{i}] {timestamp}")
+            print(f"    Model: {model}")
+            print(f"    Duration: {duration:.0f}ms")
+
+            if full:
+                prompt = entry.get("prompt", "")
+                print(f"    Prompt: {prompt[:200]}..." if len(prompt) > 200 else f"    Prompt: {prompt}")
+
+                if error:
+                    print(f"    Error: {error}")
+                else:
+                    response = entry.get("response", {})
+                    response_str = json.dumps(response, indent=2)
+                    if len(response_str) > 300:
+                        print(f"    Response: {response_str[:300]}...")
+                    else:
+                        print(f"    Response: {response_str}")
+            else:
+                if error:
+                    print(f"    Status: ✗ Error - {error[:100]}")
+                else:
+                    print(f"    Status: ✓ Success")
+
+            print()
+
+        print(f"Showing {len(recent_entries)} of {len(entries)} total entries")
+        print(f"Use --tail N to see more entries, or --full for complete details")
+
     def _setup_gym_structure(self, gym_dir: Path, repo_path: Path, profile: dict) -> None:
         """Set up basic gym directory structure.
 
@@ -697,6 +785,9 @@ Examples:
 
   # List available simulators
   dvsmith list-simulators
+
+  # View AI call logs
+  dvsmith ai-logs --tail 20 --full
         """
     )
 
@@ -720,6 +811,11 @@ Examples:
     build_parser = subparsers.add_parser("build", help="Build gym from profile")
     build_parser.add_argument("name", help="Gym name (from profile)")
     build_parser.add_argument("--sim", help="Comma-separated list of simulators")
+    build_parser.add_argument(
+        "--tasks",
+        default="stimulus",
+        help="Task types to generate: stimulus, coverage_func, all (default: %(default)s)"
+    )
 
     # Validate command
     validate_parser = subparsers.add_parser("validate", help="Validate gym")
@@ -736,6 +832,11 @@ Examples:
     # List simulators command
     subparsers.add_parser("list-simulators", help="List available simulators")
 
+    # AI logs command
+    ai_logs_parser = subparsers.add_parser("ai-logs", help="Show AI call logs")
+    ai_logs_parser.add_argument("--tail", type=int, default=10, help="Number of recent entries to show (default: 10)")
+    ai_logs_parser.add_argument("--full", action="store_true", help="Show full log content")
+
     args = parser.parse_args()
 
     if not args.command:
@@ -750,13 +851,15 @@ Examples:
         app.ingest(args.repo, name=args.name, commit=args.commit)
     elif args.command == "build":
         sims = args.sim.split(",") if args.sim else None
-        app.build(args.name, simulators=sims)
+        app.build(args.name, simulators=sims, task_types=args.tasks)
     elif args.command == "validate":
         app.validate(args.name, simulator=args.sim)
     elif args.command == "eval":
         app.eval(args.task, args.patch, simulator=args.sim, output=args.output)
     elif args.command == "list-simulators":
         app.list_simulators()
+    elif args.command == "ai-logs":
+        app.show_ai_logs(tail=args.tail, full=args.full)
     else:
         parser.print_help()
         sys.exit(1)

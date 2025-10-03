@@ -1,7 +1,14 @@
 """Pydantic models for structured AI responses."""
 
-from typing import Optional
-from pydantic import BaseModel, Field
+from typing import Literal, Optional
+from pydantic import BaseModel, Field, RootModel, ConfigDict
+
+
+class FilesEnvelope(BaseModel):
+    """Stable wrapper for a list of file paths."""
+    model_config = ConfigDict(extra="ignore")  # Tolerate stray keys if model adds them
+    kind: Literal["dvsmith.files.v1"] = "dvsmith.files.v1"
+    files: list[str] = Field(default_factory=list, description="List of .sv file paths")
 
 
 class DirectoryInfo(BaseModel):
@@ -24,12 +31,9 @@ class DirectoryInfo(BaseModel):
     )
 
 
-class TestFileList(BaseModel):
-    """List of test files."""
-    test_files: list[str] = Field(
-        default_factory=list,
-        description="List of relative file paths to test class files"
-    )
+class TestFileList(RootModel[list[str]]):
+    """List of test files as a root model (returns bare list)."""
+    root: list[str]
 
 
 class TestInfo(BaseModel):
