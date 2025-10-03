@@ -208,7 +208,7 @@ Example:
             allowed_tools=["Read", "Bash", "Glob", "Grep"],
             cwd=str(self.gym_dir),
             permission_mode="acceptEdits",  # Allow running compilation
-            max_turns=8
+            max_turns=15  # Increased from 8 to allow more thorough checking
         )
 
         results = {
@@ -216,21 +216,40 @@ Example:
             "base_test_exists": False,
             "smoke_test_passed": False,
             "missing_files": [],
-            "errors": []
+            "errors": [],
+            "agent_responses": []  # Track what agent actually said
         }
 
         try:
-            async for message in query(prompt=prompt, options=options):
-                if isinstance(message, AssistantMessage):
-                    for block in message.content:
-                        if isinstance(block, TextBlock):
-                            # Parse Claude's structured response
-                            parsed = self._parse_validation_results(block.text)
-                            # Merge results (keep most pessimistic values)
-                            results["compilation"] = results["compilation"] or parsed.get("compilation", False)
-                            results["base_test_exists"] = results["base_test_exists"] or parsed.get("base_test_exists", False)
-                            results["missing_files"].extend(parsed.get("missing_files", []))
-                            results["errors"].extend(parsed.get("errors", []))
+            import asyncio
+            # Add timeout to prevent hanging
+            async def run_with_timeout():
+                async for message in query(prompt=prompt, options=options):
+                    if isinstance(message, AssistantMessage):
+                        for block in message.content:
+                            if isinstance(block, TextBlock):
+                                # Save agent response for debugging
+                                results["agent_responses"].append(block.text[:500])
+
+                                # Parse Claude's structured response
+                                parsed = self._parse_validation_results(block.text)
+
+                                # Log if JSON parsing failed
+                                if not parsed and block.text:
+                                    print(f"[GymCleaner] Debug: Agent response (first 200 chars): {block.text[:200]}")
+
+                                # Merge results (keep most pessimistic values)
+                                results["compilation"] = results["compilation"] or parsed.get("compilation", False)
+                                results["base_test_exists"] = results["base_test_exists"] or parsed.get("base_test_exists", False)
+                                results["missing_files"].extend(parsed.get("missing_files", []))
+                                results["errors"].extend(parsed.get("errors", []))
+
+            # Run with 120 second timeout
+            await asyncio.wait_for(run_with_timeout(), timeout=120.0)
+
+        except asyncio.TimeoutError:
+            print(f"[GymCleaner] Warning: Verification timed out after 120 seconds")
+            results["errors"].append("Verification timed out")
         except Exception as e:
             print(f"[GymCleaner] Warning: Validation failed: {e}")
             results["errors"].append(f"Validation exception: {str(e)}")

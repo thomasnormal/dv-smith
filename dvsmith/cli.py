@@ -157,13 +157,14 @@ class DVSmith:
         print(f"[dv-smith] Profile saved: {profile_path}")
         print("[dv-smith] Ingest complete!")
 
-    def build(self, name: str, simulators: Optional[list[str]] = None, task_types: str = "stimulus") -> None:
+    def build(self, name: str, simulators: Optional[list[str]] = None, task_types: str = "stimulus", skip_verification: bool = False) -> None:
         """Build a gym from a profile.
 
         Args:
             name: Name of the gym/profile
             simulators: List of simulators to support (default: all in profile)
             task_types: Comma-separated task types: stimulus, coverage_func, all
+            skip_verification: Skip testbench compilation verification
         """
         print(f"[dv-smith] Building gym: {name}")
 
@@ -309,16 +310,42 @@ class DVSmith:
             yaml.dump(gym_metadata, f)
 
         # Step 5: Verify gym integrity using Claude SDK
-        print("[dv-smith] Step 5: Verifying gym integrity...")
-        validation = cleaner.verify_integrity(profile)
+        if skip_verification:
+            print("[dv-smith] Step 5: Verifying gym integrity... [SKIPPED]")
+            validation = {
+                "compilation": True,  # Assume OK when skipped
+                "base_test_exists": True,
+                "errors": [],
+                "missing_files": []
+            }
+        else:
+            print("[dv-smith] Step 5: Verifying gym integrity...")
+            validation = cleaner.verify_integrity(profile)
 
         if not validation['compilation']:
             print("  ⚠️  WARNING: Testbench compilation failed!")
-            for error in validation.get('errors', [])[:5]:  # Limit to 5 errors
-                print(f"    - {error}")
+
+            # Show specific errors if available
+            errors = validation.get('errors', [])
+            if errors:
+                print("  Errors encountered:")
+                for error in errors[:5]:  # Limit to 5 errors
+                    print(f"    - {error}")
+            else:
+                print("    No specific errors reported by verification agent")
+
+            # Show missing files if any
             if validation.get('missing_files'):
                 print(f"  Missing files: {', '.join(validation['missing_files'][:5])}")
+
+            # Show agent responses for debugging if no errors reported
+            if not errors and validation.get('agent_responses'):
+                print("  Agent output (for debugging):")
+                for resp in validation['agent_responses'][:2]:
+                    print(f"    {resp[:150]}...")
+
             print("  This gym may not be functional. Check test directory structure.")
+            print("  You can try manual compilation: cd sim/cadence_sim && make compile")
         elif not validation['base_test_exists']:
             print("  ⚠️  WARNING: Base test file not found!")
             print("  Generated tasks may not be solvable without base test infrastructure.")
@@ -816,6 +843,11 @@ Examples:
         default="stimulus",
         help="Task types to generate: stimulus, coverage_func, all (default: %(default)s)"
     )
+    build_parser.add_argument(
+        "--skip-verification",
+        action="store_true",
+        help="Skip testbench compilation verification"
+    )
 
     # Validate command
     validate_parser = subparsers.add_parser("validate", help="Validate gym")
@@ -851,7 +883,7 @@ Examples:
         app.ingest(args.repo, name=args.name, commit=args.commit)
     elif args.command == "build":
         sims = args.sim.split(",") if args.sim else None
-        app.build(args.name, simulators=sims, task_types=args.tasks)
+        app.build(args.name, simulators=sims, task_types=args.tasks, skip_verification=args.skip_verification)
     elif args.command == "validate":
         app.validate(args.name, simulator=args.sim)
     elif args.command == "eval":

@@ -382,12 +382,42 @@ Return format (STRICT):
             for fpath in file_paths:
                 # Handle both absolute and relative paths
                 p = Path(fpath)
-                full_path = p if p.is_absolute() else (tests_path / fpath)
 
-                if full_path.exists():
+                if p.is_absolute():
+                    full_path = p
+                else:
+                    # AI returns paths relative to CWD, which may include workspace prefix
+                    # Strip any leading workspace/clone prefix to get just the relative path
+                    full_path = None
+
+                    # Try interpreting as relative to CWD first
+                    cwd_path = Path.cwd() / fpath
+                    if cwd_path.exists():
+                        full_path = cwd_path
+                    else:
+                        # Try relative to tests_path (strip common prefixes)
+                        fpath_str = str(fpath)
+                        # Remove workspace prefix if present
+                        for prefix in ["dvsmith_workspace/clones/", "workspace/clones/", str(self.repo_root.name) + "/"]:
+                            if fpath_str.startswith(prefix):
+                                fpath_str = fpath_str[len(prefix):]
+                                break
+
+                        # Try with just the filename relative to tests_path
+                        just_filename = Path(fpath).name
+                        candidate = tests_path / just_filename
+                        if candidate.exists():
+                            full_path = candidate
+                        else:
+                            # Try the stripped path relative to tests_path
+                            candidate = tests_path / fpath_str
+                            if candidate.exists():
+                                full_path = candidate
+
+                if full_path and full_path.exists():
                     paths.append(full_path)
                 else:
-                    print(f"[AI Analyzer] File not found: {full_path}")
+                    print(f"[AI Analyzer] File not found: {fpath} (tried multiple path interpretations)")
 
             # If AI returned empty list or no valid files, raise error
             if not paths:
