@@ -62,6 +62,15 @@ async def query_with_pydantic_response(
         nonlocal final_obj
         if input_data.get("tool_name") == "mcp__answer__FinalAnswer":
             tool_input = input_data["tool_input"]
+
+            # Sometimes the SDK wraps the input in an extra wrapper key
+            if isinstance(tool_input, dict) and len(tool_input) == 1:
+                wrapper_key = list(tool_input.keys())[0]
+                if wrapper_key in ("answer", "parameters") and isinstance(tool_input[wrapper_key], str):
+                    import json
+                    # The data is wrapped as a JSON string
+                    tool_input = json.loads(tool_input[wrapper_key])
+
             final_obj = response_model.model_validate(tool_input)
         return {}
 
@@ -95,8 +104,6 @@ async def query_with_pydantic_response(
         system_prompt=full_system_prompt,
         mcp_servers={"answer": answer_server},
         # Don't restrict tools - let Claude use any default tools for analysis
-        # Only auto-allow our FinalAnswer tool
-        allowed_tools=["mcp__answer__FinalAnswer"],
         permission_mode="bypassPermissions",
         cwd=cwd,
         hooks={

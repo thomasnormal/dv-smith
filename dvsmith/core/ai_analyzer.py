@@ -42,11 +42,11 @@ class AIRepoAnalyzer:
 
         # Step 3: Extract test files and analyze them
         print("[AI Analyzer] Analyzing test files...")
-        tests = self._analyze_tests(dir_info.get("tests_dir"))
+        tests = self._analyze_tests(dir_info.tests_dir)
 
         # Step 4: Extract sequence files
         print("[AI Analyzer] Analyzing sequences...")
-        sequences = self._analyze_sequences(dir_info.get("sequences_dir"))
+        sequences = self._analyze_sequences(dir_info.sequences_dir)
 
         # Step 5: Find covergroups
         print("[AI Analyzer] Finding covergroups...")
@@ -67,14 +67,14 @@ class AIRepoAnalyzer:
         )
 
         # Set directory paths
-        if dir_info.get("tests_dir"):
-            analysis.tests_dir = self.repo_root / dir_info["tests_dir"]
-        if dir_info.get("sequences_dir"):
-            analysis.sequences_dir = self.repo_root / dir_info["sequences_dir"]
-        if dir_info.get("env_dir"):
-            analysis.env_dir = self.repo_root / dir_info["env_dir"]
-        if dir_info.get("agents_dir"):
-            analysis.agents_dir = self.repo_root / dir_info["agents_dir"]
+        if dir_info.tests_dir:
+            analysis.tests_dir = self.repo_root / dir_info.tests_dir
+        if dir_info.sequences_dir:
+            analysis.sequences_dir = self.repo_root / dir_info.sequences_dir
+        if dir_info.env_dir:
+            analysis.env_dir = self.repo_root / dir_info.env_dir
+        if dir_info.agents_dir:
+            analysis.agents_dir = self.repo_root / dir_info.agents_dir
 
         return analysis
 
@@ -117,7 +117,7 @@ class AIRepoAnalyzer:
                     pass
             return "\n".join(files[:100])  # Limit to first 100
 
-    def _identify_directories(self, file_tree: str) -> dict[str, str]:
+    def _identify_directories(self, file_tree: str) -> DirectoryInfo:
         """Use AI to identify key directories.
 
         Args:
@@ -177,12 +177,17 @@ class AIRepoAnalyzer:
         # If we found exactly one test directory, use it directly (no need for AI to choose)
         if len(test_dir_candidates) == 1:
             print(f"[AI Analyzer] Found single test directory: {test_dir_candidates[0]['path']}")
-            return {"tests_dir": test_dir_candidates[0]['path'], "sequences_dir": None, "env_dir": None, "agents_dir": None}
+            return DirectoryInfo(
+                tests_dir=test_dir_candidates[0]['path'],
+                sequences_dir=None,
+                env_dir=None,
+                agents_dir=None
+            )
 
         # Call async version
         return asyncio.run(self._identify_directories_async(file_tree, test_dir_candidates))
 
-    async def _identify_directories_async(self, file_tree: str, test_dir_candidates: list[dict]) -> dict[str, str]:
+    async def _identify_directories_async(self, file_tree: str, test_dir_candidates: list[dict]) -> DirectoryInfo:
         """Use AI to identify key directories (async).
 
         Args:
@@ -219,9 +224,6 @@ CRITICAL RULES:
 """
 
         try:
-            from .ai_structured import query_with_pydantic_response
-            from .ai_models import DirectoryInfo
-
             result = await query_with_pydantic_response(
                 prompt=prompt,
                 response_model=DirectoryInfo,
@@ -241,20 +243,20 @@ CRITICAL RULES:
                     else:
                         result.tests_dir = None
 
-            return {
-                "tests_dir": result.tests_dir,
-                "sequences_dir": result.sequences_dir,
-                "env_dir": result.env_dir,
-                "agents_dir": result.agents_dir,
-            }
+            return result
 
         except Exception as e:
             print(f"[AI Analyzer] Warning: Could not parse directory info: {e}")
             # Fallback to first candidate if available
             if test_dir_candidates:
                 print(f"[AI Analyzer] Using first discovered directory as fallback: {test_dir_candidates[0]['path']}")
-                return {"tests_dir": test_dir_candidates[0]['path'], "sequences_dir": None, "env_dir": None, "agents_dir": None}
-            return {}
+                return DirectoryInfo(
+                    tests_dir=test_dir_candidates[0]['path'],
+                    sequences_dir=None,
+                    env_dir=None,
+                    agents_dir=None
+                )
+            return DirectoryInfo(tests_dir=None, sequences_dir=None, env_dir=None, agents_dir=None)
 
     def _analyze_tests(self, tests_dir: Optional[str]) -> list[UVMTest]:
         """Analyze test files using AI.
@@ -350,7 +352,7 @@ IMPORTANT:
                 prompt=prompt,
                 response_model=TestFileList,
                 system_prompt="You are an expert in UVM directory structures.",
-                cwd=str(self.repo_root)
+                cwd=str(tests_path.resolve())
             )
 
             file_paths = result.test_files
@@ -360,28 +362,27 @@ IMPORTANT:
             paths = []
             for fpath in file_paths:
                 # Handle both absolute and relative paths
+                # AI returns paths relative to the Python process's working directory
                 p = Path(fpath)
                 if p.is_absolute():
                     full_path = p
                 else:
-                    full_path = tests_path / fpath
+                    # Join with current working directory (not tests_path)
+                    full_path = Path.cwd() / fpath
 
                 if full_path.exists():
                     paths.append(full_path)
                 else:
                     print(f"[AI Analyzer] File not found: {full_path}")
 
-            # If AI returned empty list or no valid files, use fallback
+            # If AI returned empty list or no valid files, raise error
             if not paths:
-                print(f"[AI Analyzer] No test files identified by AI, using directory glob")
-                return list(tests_path.glob("*.sv"))
+                raise RuntimeError(f"AI did not identify any valid test files in {tests_path}")
 
             return paths
 
         except Exception as e:
-            print(f"[AI Analyzer] Warning: Could not identify test files with AI: {e}")
-            # Fallback: find all .sv files in test directory
-            return list(tests_path.glob("*.sv"))
+            raise RuntimeError(f"Could not identify test files with AI: {e}") from e
 
     def _extract_test_info(self, file_path: Path, content: str) -> Optional[UVMTest]:
         """Extract test information using AI.
@@ -487,7 +488,7 @@ If this IS a valid UVM test class, extract:
 
         return sequences
 
-    def _find_covergroups(self, dir_info: dict[str, str]) -> list[str]:
+    def _find_covergroups(self, dir_info: DirectoryInfo) -> list[str]:
         """Find covergroup definitions using AI.
 
         Args:
@@ -498,9 +499,9 @@ If this IS a valid UVM test class, extract:
         """
         # Search in env and agents directories
         search_dirs = []
-        for key in ["env_dir", "agents_dir"]:
-            if dir_info.get(key):
-                path = self.repo_root / dir_info[key]
+        for dir_path in [dir_info.env_dir, dir_info.agents_dir]:
+            if dir_path:
+                path = self.repo_root / dir_path
                 if path.exists():
                     search_dirs.append(path)
 
@@ -621,9 +622,6 @@ Look for:
         }
 
         try:
-            from .ai_structured import query_with_pydantic_response
-            from .ai_models import BuildInfo
-
             result = await query_with_pydantic_response(
                 prompt=prompt,
                 response_model=BuildInfo,

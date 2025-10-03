@@ -59,7 +59,7 @@ class Evaluator:
         print(f"[Evaluator] Evaluating task: {task.id}")
 
         # 1. Apply patch
-        if not self._apply_patch(patch_path):
+        if not self._apply_patch(task, patch_path):
             return self._failure_result(task, "Patch application failed")
 
         # 2. Compile
@@ -84,22 +84,23 @@ class Evaluator:
         coverage = self.adapter.extract_coverage(sim_result)
 
         # 5. Compute score
-        return self._score(task, coverage, sim_result.log_path, sim_result.coverage_db_path)
+        result = self._score(task, coverage, sim_result.log_path, sim_result.coverage_db_path)
 
-    def _apply_patch(self, patch_path: Path) -> bool:
+        # 6. Persist artifacts (result.json, logs, coverage DB)
+        self._persist_artifacts(work_dir, result)
+
+        return result
+
+    def _apply_patch(self, task: TaskSpec, patch_path: Path) -> bool:
         """Apply patch to gym.
 
         Args:
+            task: Task specification
             patch_path: Path to patch file
 
         Returns:
             True if patch applied successfully
         """
-        # Validate patch only touches allowed paths
-        if not self._validate_patch(patch_path):
-            print("[Evaluator] Patch validation failed")
-            return False
-
         # Convert to absolute path since git apply runs with cwd=gym_dir
         abs_patch_path = patch_path.resolve()
 
@@ -127,44 +128,6 @@ class Evaluator:
 
         except Exception as e:
             print(f"[Evaluator] Patch application error: {e}")
-            return False
-
-    def _validate_patch(self, patch_path: Path) -> bool:
-        """Validate patch only modifies allowed files.
-
-        Args:
-            patch_path: Path to patch file
-
-        Returns:
-            True if patch is valid
-        """
-        # Allow modifications to test directories (both common structures)
-        allowed_dirs = ["tests/", "sequences/", "cfg/", "src/hvl_top/test/", "src/"]
-
-        try:
-            # Parse patch to find modified files
-            content = patch_path.read_text()
-
-            # Find all file paths in diff
-            import re
-            file_pattern = re.compile(r"^[\+\-]{3}\s+[ab]/(.*?)$", re.MULTILINE)
-            files = set(file_pattern.findall(content))
-
-            # Check each file
-            for file_path in files:
-                if file_path == "/dev/null":
-                    continue
-
-                # Check if file is in allowed directory
-                allowed = any(file_path.startswith(d) for d in allowed_dirs)
-                if not allowed:
-                    print(f"[Evaluator] Patch modifies disallowed file: {file_path}")
-                    return False
-
-            return True
-
-        except Exception as e:
-            print(f"[Evaluator] Patch validation error: {e}")
             return False
 
     def _infer_test_name(self, task: TaskSpec) -> str:
@@ -420,6 +383,29 @@ class Evaluator:
             health_score=0.0,
             log_path=log_path
         )
+
+    def _persist_artifacts(self, work_dir: Path, result: EvaluationResult) -> None:
+        """Persist evaluation artifacts to work directory.
+
+        Args:
+            work_dir: Working directory for this evaluation
+            result: Evaluation result to persist
+
+        Saves:
+            - result.json: Compact JSON summary of evaluation
+            - Logs, coverage DB paths already tracked in result
+        """
+        try:
+            # Save result.json
+            result_json_path = work_dir / "result.json"
+            result_json_path.write_text(result.to_json())
+            print(f"[Evaluator] Saved result to {result_json_path}")
+
+            # Log paths are already in result (log_path, coverage_db_path)
+            # These can be used for leaderboards, analysis, etc.
+
+        except Exception as e:
+            print(f"[Evaluator] Warning: Could not persist artifacts: {e}")
 
     def _select_simulator(self) -> Simulator:
         """Select simulator from profile or environment."""

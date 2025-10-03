@@ -39,7 +39,7 @@ class TaskGenerator:
         self.analysis = repo_analysis
         self.config = profile_config
         self.backup_dir = Path("backups/original_tests")
-        self.cwd = Path.cwd()
+        self.cwd = str(Path.cwd())
 
     def generate_tasks(self, output_dir: Path,
                       smoke_tests: Optional[list[str]] = None) -> list[TaskSpec]:
@@ -109,9 +109,9 @@ class TaskGenerator:
 
         # Create task spec
         # Sanitize task name for use in IDs and filenames
-        task_id = task_name.lower().replace(' ', '_').replace('/', '_').replace('\\', '_')
+        task_slug = task_name.lower().replace(' ', '_').replace('/', '_').replace('\\', '_')
         task = TaskSpec(
-            id=task_id,
+            id=task_slug,
             name=task_name,
             level=level,
             bench_name=self.config.get("name", "unknown"),
@@ -201,7 +201,7 @@ If none are clearly relevant, select the most general covergroups.
                 prompt=prompt,
                 response_model=CovergroupSelection,
                 system_prompt="You are an expert verification engineer analyzing test coverage requirements.",
-                cwd=str(self.cwd)
+                cwd=self.cwd
             )
 
             # Filter to only include covergroups that exist
@@ -293,9 +293,9 @@ Examples:
                 prompt=prompt,
                 response_model=TaskName,
                 system_prompt="You are an expert verification engineer creating clear, concise task names.",
-                cwd=str(self.cwd)
+                cwd=self.cwd
             )
-            return result.name.strip().strip('"\'')
+            return result.name.strip()
 
         except Exception as e:
             # Fallback to simple transformation
@@ -337,7 +337,7 @@ Classify the difficulty:
                 prompt=prompt,
                 response_model=TaskDifficulty,
                 system_prompt="You are an expert verification engineer assessing test complexity.",
-                cwd=str(self.cwd)
+                cwd=self.cwd
             )
 
             difficulty = result.difficulty.strip().upper()
@@ -388,9 +388,9 @@ Do NOT include implementation details like "write a UVM test" - focus on WHAT ne
                 prompt=prompt,
                 response_model=TaskDescription,
                 system_prompt="You are an expert verification engineer writing task specifications. Be thorough and specific.",
-                cwd=str(self.cwd)
+                cwd=self.cwd
             )
-            return result.description.strip().strip('"\'')
+            return result.description.strip()
 
         except Exception as e:
             raise RuntimeError(f"AI description generation failed: {e}") from e
@@ -420,9 +420,9 @@ Keep it actionable and clear.
                 prompt=prompt,
                 response_model=TaskGoal,
                 system_prompt="You are an expert verification engineer. Write clear, actionable goals.",
-                cwd=str(self.cwd)
+                cwd=self.cwd
             )
-            return result.goal.strip().strip('"\'')
+            return result.goal.strip()
 
         except Exception as e:
             raise RuntimeError(f"AI goal generation failed: {e}") from e
@@ -462,7 +462,7 @@ Hints should mention:
                 prompt=prompt,
                 response_model=TaskHints,
                 system_prompt="You are an expert verification engineer. Provide helpful but not overly explicit hints.",
-                cwd=str(self.cwd)
+                cwd=self.cwd
             )
             return result.hints
 
