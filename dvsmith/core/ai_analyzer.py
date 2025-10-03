@@ -1,14 +1,14 @@
 """AI-powered repository analyzer using Anthropic Claude."""
 
+import asyncio
 import json
-import os
 import re
 import subprocess
 from pathlib import Path
 from typing import Any, Optional
 
-from anthropic import Anthropic
-
+from .ai_structured import query_with_pydantic_response
+from .ai_models import DirectoryInfo, TestFileList, TestInfo, BuildInfo
 from .models import BuildSystem, RepoAnalysis, Simulator, UVMSequence, UVMTest
 
 
@@ -24,13 +24,6 @@ class AIRepoAnalyzer:
         self.repo_root = Path(repo_root)
         if not self.repo_root.exists():
             raise ValueError(f"Repository not found: {repo_root}")
-
-        # Initialize Anthropic client
-        api_key = os.getenv("ANTHROPIC_API_KEY")
-        if not api_key:
-            raise ValueError("ANTHROPIC_API_KEY not found in environment")
-
-        self.client = Anthropic(api_key=api_key)
 
     def analyze(self) -> RepoAnalysis:
         """Analyze repository using AI.
@@ -186,6 +179,19 @@ class AIRepoAnalyzer:
             print(f"[AI Analyzer] Found single test directory: {test_dir_candidates[0]['path']}")
             return {"tests_dir": test_dir_candidates[0]['path'], "sequences_dir": None, "env_dir": None, "agents_dir": None}
 
+        # Call async version
+        return asyncio.run(self._identify_directories_async(file_tree, test_dir_candidates))
+
+    async def _identify_directories_async(self, file_tree: str, test_dir_candidates: list[dict]) -> dict[str, str]:
+        """Use AI to identify key directories (async).
+
+        Args:
+            file_tree: Repository structure
+            test_dir_candidates: Pre-computed test directory candidates
+
+        Returns:
+            Dictionary with directory paths
+        """
         # Format for prompt
         test_dir_info = []
         for c in test_dir_candidates[:10]:
@@ -209,45 +215,39 @@ Based on the test directory candidates above, identify:
 CRITICAL RULES:
 - Use the EXACT path from the "Test directory candidates" list above
 - For tests_dir, ALWAYS prefer [HIGH priority] over [LOW priority]
-- Return null if no suitable directory found
-
-Return ONLY a JSON object.
-Example: {{"tests_dir": "src/hvl_top/test", "sequences_dir": "src/hvl_top/sequences", "env_dir": "src/hvl_top/env", "agents_dir": null}}
+- Use null for any directory not found
 """
 
-        response = self.client.messages.create(
-            model="claude-3-5-sonnet-20241022",
-            max_tokens=500,
-            temperature=0.1,
-            system="You are an expert in SystemVerilog and UVM testbench structure. Return only valid JSON.",
-            messages=[
-                {"role": "user", "content": prompt}
-            ]
-        )
-
         try:
-            content = response.content[0].text.strip()
-            # Extract JSON from markdown code blocks if present
-            if "```json" in content:
-                content = content.split("```json")[1].split("```")[0].strip()
-            elif "```" in content:
-                content = content.split("```")[1].split("```")[0].strip()
+            from .ai_structured import query_with_pydantic_response
+            from .ai_models import DirectoryInfo
 
-            dir_info = json.loads(content)
+            result = await query_with_pydantic_response(
+                prompt=prompt,
+                response_model=DirectoryInfo,
+                system_prompt="You are an expert in SystemVerilog and UVM testbench structure.",
+                cwd=str(self.repo_root)
+            )
 
             # Validate that the tests_dir actually exists
-            if dir_info.get("tests_dir"):
-                test_path = self.repo_root / dir_info["tests_dir"]
+            if result.tests_dir:
+                test_path = self.repo_root / result.tests_dir
                 if not test_path.exists():
-                    print(f"[AI Analyzer] Warning: AI suggested non-existent path: {dir_info['tests_dir']}")
+                    print(f"[AI Analyzer] Warning: AI suggested non-existent path: {result.tests_dir}")
                     # Use first candidate we actually found
                     if test_dir_candidates:
                         print(f"[AI Analyzer] Using first discovered directory instead: {test_dir_candidates[0]['path']}")
-                        dir_info["tests_dir"] = test_dir_candidates[0]['path']
+                        result.tests_dir = test_dir_candidates[0]['path']
                     else:
-                        dir_info["tests_dir"] = None
+                        result.tests_dir = None
 
-            return dir_info
+            return {
+                "tests_dir": result.tests_dir,
+                "sequences_dir": result.sequences_dir,
+                "env_dir": result.env_dir,
+                "agents_dir": result.agents_dir,
+            }
+
         except Exception as e:
             print(f"[AI Analyzer] Warning: Could not parse directory info: {e}")
             # Fallback to first candidate if available
@@ -316,6 +316,18 @@ Example: {{"tests_dir": "src/hvl_top/test", "sequences_dir": "src/hvl_top/sequen
         Returns:
             List of Path objects to test files
         """
+        return asyncio.run(self._find_test_files_with_ai_async(tests_path, dir_tree))
+
+    async def _find_test_files_with_ai_async(self, tests_path: Path, dir_tree: str) -> list[Path]:
+        """Use AI to identify test files from directory tree (async).
+
+        Args:
+            tests_path: Path to test directory
+            dir_tree: Output of ls -R
+
+        Returns:
+            List of Path objects to test files
+        """
         prompt = f"""Analyze this UVM test directory structure and identify ALL test class files.
 
 Directory tree:
@@ -331,43 +343,40 @@ IMPORTANT:
 - EXCLUDE package files (*pkg.sv, *package*.sv)
 - EXCLUDE files in "sequences" or "seq" directories
 - When in doubt, include the file (we verify contents later)
-
-Return a JSON array of ALL relative file paths that might be test classes.
-Example: ["SpiBaseTest.sv", "apb_test.sv", "test/my_case.sv"]
 """
 
         try:
-            response = self.client.messages.create(
-                model="claude-3-5-sonnet-20241022",
-                max_tokens=500,
-                temperature=0.1,
-                system="You are an expert in UVM directory structures. Return only valid JSON.",
-                messages=[
-                    {"role": "user", "content": prompt}
-                ]
+            result = await query_with_pydantic_response(
+                prompt=prompt,
+                response_model=TestFileList,
+                system_prompt="You are an expert in UVM directory structures.",
+                cwd=str(self.repo_root)
             )
 
-            content = response.content[0].text.strip()
-            if "```json" in content:
-                content = content.split("```json")[1].split("```")[0].strip()
-            elif "```" in content:
-                content = content.split("```")[1].split("```")[0].strip()
-
-            file_paths = json.loads(content)
+            file_paths = result.test_files
+            print(f"[AI Analyzer] AI identified {len(file_paths)} test files")
 
             # Convert to Path objects
-            result = []
+            paths = []
             for fpath in file_paths:
-                full_path = tests_path / fpath
+                # Handle both absolute and relative paths
+                p = Path(fpath)
+                if p.is_absolute():
+                    full_path = p
+                else:
+                    full_path = tests_path / fpath
+
                 if full_path.exists():
-                    result.append(full_path)
+                    paths.append(full_path)
+                else:
+                    print(f"[AI Analyzer] File not found: {full_path}")
 
             # If AI returned empty list or no valid files, use fallback
-            if not result:
+            if not paths:
                 print(f"[AI Analyzer] No test files identified by AI, using directory glob")
                 return list(tests_path.glob("*.sv"))
 
-            return result
+            return paths
 
         except Exception as e:
             print(f"[AI Analyzer] Warning: Could not identify test files with AI: {e}")
@@ -384,96 +393,57 @@ Example: ["SpiBaseTest.sv", "apb_test.sv", "test/my_case.sv"]
         Returns:
             UVMTest object or None
         """
-        prompt = f"""Analyze this SystemVerilog file and extract UVM TEST class information.
+        return asyncio.run(self._extract_test_info_async(file_path, content))
+
+    async def _extract_test_info_async(self, file_path: Path, content: str) -> Optional[UVMTest]:
+        """Extract test information using AI (async).
+
+        Args:
+            file_path: Path to test file
+            content: File content
+
+        Returns:
+            UVMTest object or None
+        """
+        prompt = f"""Analyze this SystemVerilog file and determine if it contains a UVM TEST class.
 
 File: {file_path.name}
 ```systemverilog
 {content}
 ```
 
-IMPORTANT: Only extract if this is a UVM TEST class (extends uvm_test or *_test base class).
-Do NOT extract if this is:
-- A sequence (extends *_sequence or uvm_sequence)
-- A package file (*_pkg.sv)
-- A configuration class
-- A virtual sequence
+IMPORTANT: This should ONLY be classified as a UVM test if it:
+- Contains a class that extends uvm_test or a *_test base class
+- Is NOT a sequence (extends *_sequence or uvm_sequence)
+- Is NOT a package file (*_pkg.sv)
+- Is NOT a configuration class
+- Is NOT a virtual sequence
 
-Extract:
-1. class_name: Name of the TEST class only
+If this IS a valid UVM test class, extract:
+1. class_name: Name of the TEST class
 2. base_class: What it extends
-3. description: Brief description (1 sentence)
-
-Return ONLY valid JSON or null if not a test class.
-Example: {{"class_name": "apb_8b_write_test", "base_class": "apb_base_test", "description": "Tests 8-bit write operations"}}
+3. description: Brief description (1 sentence) of what it tests
 """
 
         try:
-            response = self.client.messages.create(
-                model="claude-3-5-sonnet-20241022",
-                max_tokens=200,
-                temperature=0.1,
-                system="You are an expert in SystemVerilog/UVM. Return only valid JSON.",
-                messages=[
-                    {"role": "user", "content": prompt}
-                ]
+            result = await query_with_pydantic_response(
+                prompt=prompt,
+                response_model=TestInfo,
+                system_prompt="You are an expert in SystemVerilog/UVM.",
+                cwd=str(self.repo_root)
             )
 
-            content = response.content[0].text.strip()
-            if "```json" in content:
-                content = content.split("```json")[1].split("```")[0].strip()
-            elif "```" in content:
-                content = content.split("```")[1].split("```")[0].strip()
-
-            if content.lower() == "null" or content.lower() == "none":
-                return None
-
-            # Clean up common JSON formatting issues
-            # Remove any text after the closing brace/bracket
-            if content.startswith('{'):
-                # Find the matching closing brace
-                brace_count = 0
-                for i, char in enumerate(content):
-                    if char == '{':
-                        brace_count += 1
-                    elif char == '}':
-                        brace_count -= 1
-                        if brace_count == 0:
-                            content = content[:i+1]
-                            break
-            elif content.startswith('['):
-                # Find the matching closing bracket
-                bracket_count = 0
-                for i, char in enumerate(content):
-                    if char == '[':
-                        bracket_count += 1
-                    elif char == ']':
-                        bracket_count -= 1
-                        if bracket_count == 0:
-                            content = content[:i+1]
-                            break
-
-            info = json.loads(content)
-
-            # Handle case where AI returns a list (multiple classes in one file)
-            if isinstance(info, list):
-                if len(info) > 0:
-                    info = info[0]  # Take first test class
-                else:
-                    return None
-
-            # Validate it's a dict with required fields
-            if not isinstance(info, dict) or "class_name" not in info:
-                print(f"[AI Analyzer] ERROR: Invalid format from AI for {file_path.name}: {info}")
+            if not result.is_test or not result.class_name:
                 return None
 
             return UVMTest(
-                name=info["class_name"],
+                name=result.class_name,
                 file_path=file_path,
-                base_class=info.get("base_class", "unknown"),
-                description=info.get("description")
+                base_class=result.base_class or "unknown",
+                description=result.description
             )
+
         except Exception as e:
-            # No fallback - AI must work 100%
             print(f"[AI Analyzer] ERROR: Failed to extract test from {file_path.name}: {e}")
             return None
 
@@ -603,9 +573,22 @@ Example: {{"class_name": "apb_8b_write_test", "base_class": "apb_base_test", "de
             except:
                 pass
 
+        # Call async version
+        return asyncio.run(self._detect_build_system_async(build_content, detected_sims))
+
+    async def _detect_build_system_async(self, build_content: str, detected_sims: set[str]) -> dict[str, Any]:
+        """Detect build system and simulators using AI (async).
+
+        Args:
+            build_content: Concatenated build file contents
+            detected_sims: Simulators detected by regex
+
+        Returns:
+            Dictionary with build_system and simulators
+        """
         prompt = f"""Analyze these build files and identify:
 1. Build system type (makefile, cmake, fusesoc, dvsim, or custom)
-2. ALL simulators mentioned or supported (questa/modelsim, xcelium/irun/ncsim, vcs, verilator, dsim)
+2. ALL simulators mentioned or supported (questa, modelsim, xcelium, irun, vcs, verilator, dsim)
 
 Build files:
 ```
@@ -616,9 +599,6 @@ Look for:
 - Tool commands: vsim, xrun, irun, vcs, verilator, dsim
 - Directory names: questa_sim, cadence_sim, synopsys_sim
 - Comments mentioning simulators
-
-Return ONLY a JSON object with ALL simulators found.
-Example: {{"build_system": "makefile", "simulators": ["questa", "xcelium", "vcs"]}}
 """
 
         # Define mappings outside try block so they're available in except
@@ -641,38 +621,18 @@ Example: {{"build_system": "makefile", "simulators": ["questa", "xcelium", "vcs"
         }
 
         try:
-            response = self.client.messages.create(
-                model="claude-3-5-sonnet-20241022",
-                max_tokens=200,
-                temperature=0.1,
-                system="You are an expert in EDA build systems. Return only valid JSON.",
-                messages=[
-                    {"role": "user", "content": prompt}
-                ]
+            from .ai_structured import query_with_pydantic_response
+            from .ai_models import BuildInfo
+
+            result = await query_with_pydantic_response(
+                prompt=prompt,
+                response_model=BuildInfo,
+                system_prompt="You are an expert in EDA build systems.",
+                cwd=str(self.repo_root)
             )
 
-            content = response.content[0].text.strip()
-            if "```json" in content:
-                content = content.split("```json")[1].split("```")[0].strip()
-            elif "```" in content:
-                content = content.split("```")[1].split("```")[0].strip()
-
-            # Clean up JSON response - remove extra data after closing brace
-            if content.startswith('{'):
-                brace_count = 0
-                for i, char in enumerate(content):
-                    if char == '{':
-                        brace_count += 1
-                    elif char == '}':
-                        brace_count -= 1
-                        if brace_count == 0:
-                            content = content[:i+1]
-                            break
-
-            info = json.loads(content)
-
-            build_system = build_sys_map.get(info.get("build_system", "custom"), BuildSystem.CUSTOM)
-            ai_simulators = [sim_map[s] for s in info.get("simulators", []) if s in sim_map]
+            build_system = build_sys_map.get(result.build_system, BuildSystem.CUSTOM)
+            ai_simulators = [sim_map[s] for s in result.simulators if s in sim_map]
 
             # Merge with regex-detected simulators
             regex_simulators = [sim_map[s] for s in detected_sims if s in sim_map]

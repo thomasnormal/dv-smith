@@ -1,13 +1,21 @@
 """Task generator - converts original tests into task specifications."""
 
+import asyncio
 import contextlib
 import json
-import os
+import re
 from pathlib import Path
 from typing import Any, Optional
 
-from anthropic import Anthropic
-
+from .ai_structured import query_with_pydantic_response
+from .ai_models import (
+    TaskName,
+    TaskDifficulty,
+    TaskDescription,
+    TaskGoal,
+    TaskHints,
+    CovergroupSelection,
+)
 from .models import (
     AcceptanceCriteria,
     RepoAnalysis,
@@ -31,14 +39,7 @@ class TaskGenerator:
         self.analysis = repo_analysis
         self.config = profile_config
         self.backup_dir = Path("backups/original_tests")
-
-        # Initialize Anthropic client (required)
-        api_key = os.getenv("ANTHROPIC_API_KEY")
-        if not api_key:
-            raise ValueError("ANTHROPIC_API_KEY environment variable is required")
-
-        self.client = Anthropic(api_key=api_key)
-        print("[TaskGen] Using Claude for task descriptions")
+        self.cwd = Path.cwd()
 
     def generate_tasks(self, output_dir: Path,
                       smoke_tests: Optional[list[str]] = None) -> list[TaskSpec]:
@@ -91,27 +92,31 @@ class TaskGenerator:
         Returns:
             TaskSpec
         """
-        # Infer task name and level
-        task_name = self._derive_task_name(test.name)
-        level = self._infer_difficulty(test)
+        # Generate task name using AI
+        task_name = self._generate_task_name_with_ai(test)
 
-        # Create acceptance criteria based on test
+        # Infer difficulty using AI
+        level = self._infer_difficulty_with_ai(test)
+
+        # Create acceptance criteria with AI-inferred covergroups
         acceptance = self._create_acceptance_criteria(test)
 
         # Extract hints from test description/name
-        hints = self._extract_hints(test)
+        hints = self._extract_hints_with_ai(test)
 
         # Get supported simulators from profile
         supported_sims = self._get_supported_simulators()
 
         # Create task spec
+        # Sanitize task name for use in IDs and filenames
+        task_id = task_name.lower().replace(' ', '_').replace('/', '_').replace('\\', '_')
         task = TaskSpec(
-            id=f"{task_name.lower().replace(' ', '_')}",
+            id=task_id,
             name=task_name,
             level=level,
             bench_name=self.config.get("name", "unknown"),
-            description=self._generate_description(test),
-            goal=self._generate_goal(test),
+            description=self._generate_description_with_ai(test),
+            goal=self._generate_goal_with_ai(test),
             acceptance=acceptance,
             hints=hints,
             original_test_files=[test.file_path],
@@ -121,48 +126,6 @@ class TaskGenerator:
 
         return task
 
-    def _derive_task_name(self, test_name: str) -> str:
-        """Derive human-readable task name from test class name.
-
-        Example:
-            apb_master_sparse_write_test -> APB Sparse Write Test
-        """
-        # Remove common suffixes
-        name = test_name.replace("_test", "").replace("_seq", "")
-
-        # Remove common prefixes
-        for prefix in ["apb_", "axi_", "i3c_", "spi_", "master_", "slave_"]:
-            if name.startswith(prefix):
-                name = name[len(prefix):]
-                break
-
-        # Convert to title case
-        words = name.split("_")
-        return " ".join(w.capitalize() for w in words)
-
-    def _infer_difficulty(self, test: UVMTest) -> TaskLevel:
-        """Infer task difficulty from test characteristics.
-
-        Heuristics:
-        - Simple read/write tests -> EASY
-        - Tests with constraints, randomization -> MEDIUM
-        - Tests with complex scenarios, multiple sequences -> HARD
-        """
-        name_lower = test.name.lower()
-
-        # Easy indicators
-        easy_keywords = ["simple", "basic", "smoke", "sanity", "single"]
-        if any(kw in name_lower for kw in easy_keywords):
-            return TaskLevel.EASY
-
-        # Hard indicators
-        hard_keywords = ["complex", "concurrent", "stress", "random",
-                        "outstanding", "interleave", "ooo"]
-        if any(kw in name_lower for kw in hard_keywords):
-            return TaskLevel.HARD
-
-        # Default to medium
-        return TaskLevel.MEDIUM
 
     def _create_acceptance_criteria(self, test: UVMTest) -> AcceptanceCriteria:
         """Create acceptance criteria for a test.
@@ -199,67 +162,56 @@ class TaskGenerator:
         return criteria
 
     def _infer_target_covergroups(self, test: UVMTest) -> list[str]:
-        """Infer which covergroups are relevant for a test.
+        """Infer which covergroups are relevant for a test using AI."""
+        return asyncio.run(self._infer_target_covergroups_async(test))
 
-        Uses keyword matching between test name and covergroup names.
-        """
-        targets = []
+    async def _infer_target_covergroups_async(self, test: UVMTest) -> list[str]:
+        """Infer which covergroups are relevant for a test using AI (async)."""
+        available_cgs = self.analysis.covergroups
 
-        # Extract keywords from test name
-        test_keywords = set(test.name.lower().replace("_test", "").split("_"))
-
-        # Match against known covergroups
-        for cg in self.analysis.covergroups:
-            cg_lower = cg.lower()
-
-            # Check if any test keyword appears in covergroup name
-            for keyword in test_keywords:
-                if len(keyword) > 3 and keyword in cg_lower:
-                    targets.append(cg)
-                    break
-
-        # If no matches, include common master/slave coverage groups
-        if not targets:
-            # Use default covergroups from profile
+        if not available_cgs:
             profile_cgs = self.config.get("coverage", {}).get("questa", {}).get(
                 "functional_covergroups", [])
-            if profile_cgs:
-                targets = profile_cgs[:3]  # Take first few as defaults
+            return profile_cgs[:3] if profile_cgs else []
 
-        return targets
+        test_code = ""
+        if test.file_path.exists():
+            with contextlib.suppress(Exception):
+                test_code = test.file_path.read_text()[:2000]
 
-    def _extract_hints(self, test: UVMTest) -> list[str]:
-        """Extract hints from test description and name using AI.
+        prompt = f"""Analyze this UVM test to determine which functional coverage groups should be targeted.
 
-        Args:
-            test: UVM test
+Test name: {test.name}
+Test description: {test.description or 'Not available'}
 
-        Returns:
-            List of hint strings
-        """
-        return self._extract_hints_with_ai(test)
+Test file snippet:
+```systemverilog
+{test_code}
+```
 
-    def _generate_description(self, test: UVMTest) -> str:
-        """Generate task description from test using AI.
+Available covergroups in the testbench:
+{json.dumps(available_cgs, indent=2)}
 
-        Args:
-            test: UVM test
+Select 2-4 of the most relevant covergroups from the available list that this test should target.
+If none are clearly relevant, select the most general covergroups.
+"""
 
-        Returns:
-            Description string
-        """
-        return self._generate_description_with_ai(test)
+        try:
+            result = await query_with_pydantic_response(
+                prompt=prompt,
+                response_model=CovergroupSelection,
+                system_prompt="You are an expert verification engineer analyzing test coverage requirements.",
+                cwd=str(self.cwd)
+            )
 
-    def _generate_goal(self, test: UVMTest) -> str:
-        """Generate task goal statement using AI.
+            # Filter to only include covergroups that exist
+            valid_targets = [t for t in result.covergroups if t in available_cgs]
+            return valid_targets if valid_targets else available_cgs[:3]
 
-        Args:
-            test: UVM test
+        except Exception as e:
+            print(f"[TaskGen] Warning: AI covergroup inference failed for {test.name}: {e}")
+            return available_cgs[:3]
 
-        Returns:
-            Goal string
-        """
-        return self._generate_goal_with_ai(test)
 
     def _generate_notes(self, test: UVMTest) -> Optional[str]:
         """Generate additional notes about the task.
@@ -303,22 +255,115 @@ class TaskGenerator:
 
     # AI-powered generation methods
 
-    def _generate_description_with_ai(self, test: UVMTest) -> str:
-        """Generate thorough task description using AI.
+    def _generate_task_name_with_ai(self, test: UVMTest) -> str:
+        """Generate human-readable task name using AI.
 
         Args:
             test: UVM test
 
         Returns:
-            Human-like task description
+            Task name string
         """
-        # Read original test file for context
+        return asyncio.run(self._generate_task_name_with_ai_async(test))
+
+    async def _generate_task_name_with_ai_async(self, test: UVMTest) -> str:
+        """Generate human-readable task name using AI (async).
+
+        Args:
+            test: UVM test
+
+        Returns:
+            Task name string
+        """
+        prompt = f"""Generate a concise, human-readable task name for this UVM verification test.
+
+Test class name: {test.name}
+Test description: {test.description or 'Not available'}
+
+The name should be 2-5 words, clear and professional.
+
+Examples:
+- "apb_master_sparse_write_test" -> "Sparse Write Test"
+- "axi_concurrent_read_write_test" -> "Concurrent Read/Write Test"
+- "i3c_back_to_back_transfers_test" -> "Back-to-Back Transfers"
+"""
+
+        try:
+            result = await query_with_pydantic_response(
+                prompt=prompt,
+                response_model=TaskName,
+                system_prompt="You are an expert verification engineer creating clear, concise task names.",
+                cwd=str(self.cwd)
+            )
+            return result.name.strip().strip('"\'')
+
+        except Exception as e:
+            # Fallback to simple transformation
+            print(f"[TaskGen] Warning: AI task name generation failed for {test.name}: {e}")
+            name = test.name.replace("_test", "").replace("_seq", "")
+            words = name.split("_")
+            return " ".join(w.capitalize() for w in words)
+
+    def _infer_difficulty_with_ai(self, test: UVMTest) -> TaskLevel:
+        """Infer task difficulty using AI."""
+        return asyncio.run(self._infer_difficulty_with_ai_async(test))
+
+    async def _infer_difficulty_with_ai_async(self, test: UVMTest) -> TaskLevel:
+        """Infer task difficulty using AI (async)."""
+        test_code = ""
+        if test.file_path.exists():
+            with contextlib.suppress(Exception):
+                test_code = test.file_path.read_text()[:2000]
+
+        prompt = f"""Analyze this UVM test to determine its difficulty level.
+
+Test name: {test.name}
+Base class: {test.base_class}
+Test description: {test.description or 'Not available'}
+
+Test file snippet:
+```systemverilog
+{test_code}
+```
+
+Classify the difficulty:
+- EASY: Simple, straightforward tests (basic reads/writes, single transactions)
+- MEDIUM: Moderate complexity (some randomization, basic sequences, simple scenarios)
+- HARD: Complex tests (advanced randomization, concurrent operations, complex protocols, stress testing)
+"""
+
+        try:
+            result = await query_with_pydantic_response(
+                prompt=prompt,
+                response_model=TaskDifficulty,
+                system_prompt="You are an expert verification engineer assessing test complexity.",
+                cwd=str(self.cwd)
+            )
+
+            difficulty = result.difficulty.strip().upper()
+            if "EASY" in difficulty:
+                return TaskLevel.EASY
+            elif "HARD" in difficulty:
+                return TaskLevel.HARD
+            else:
+                return TaskLevel.MEDIUM
+
+        except Exception as e:
+            print(f"[TaskGen] Warning: AI difficulty inference failed for {test.name}: {e}")
+            return TaskLevel.MEDIUM
+
+    def _generate_description_with_ai(self, test: UVMTest) -> str:
+        """Generate thorough task description using AI."""
+        return asyncio.run(self._generate_description_with_ai_async(test))
+
+    async def _generate_description_with_ai_async(self, test: UVMTest) -> str:
+        """Generate thorough task description using AI (async)."""
         test_code = ""
         if test.file_path.exists():
             with contextlib.suppress(Exception):
                 test_code = test.file_path.read_text()[:3000]
 
-        prompt = f"""You are creating a task specification for a UVM verification challenge, similar to LeetCode but for hardware verification.
+        prompt = f"""Create a task specification for a UVM verification challenge (similar to LeetCode for hardware).
 
 Test name: {test.name}
 Base class: {test.base_class}
@@ -336,83 +381,64 @@ Write a clear, detailed task description (2-4 sentences) that:
 4. Sounds natural and human-written (not templated)
 
 Do NOT include implementation details like "write a UVM test" - focus on WHAT needs to be verified.
-Return ONLY the description text, no markdown, no quotes."""
+"""
 
         try:
-            response = self.client.messages.create(
-                model="claude-3-5-sonnet-20241022",
-                max_tokens=300,
-                temperature=0.7,
-                system="You are an expert verification engineer writing task specifications. Be thorough and specific.",
-                messages=[
-                    {"role": "user", "content": prompt}
-                ]
+            result = await query_with_pydantic_response(
+                prompt=prompt,
+                response_model=TaskDescription,
+                system_prompt="You are an expert verification engineer writing task specifications. Be thorough and specific.",
+                cwd=str(self.cwd)
             )
-
-            description = response.content[0].text.strip()
-            # Remove quotes if AI added them
-            description = description.strip('"\'')
-            return description
+            return result.description.strip().strip('"\'')
 
         except Exception as e:
             raise RuntimeError(f"AI description generation failed: {e}") from e
 
     def _generate_goal_with_ai(self, test: UVMTest) -> str:
-        """Generate task goal using AI.
+        """Generate task goal using AI."""
+        return asyncio.run(self._generate_goal_with_ai_async(test))
 
-        Args:
-            test: UVM test
-
-        Returns:
-            Goal string
-        """
-        prompt = f"""You are creating a task specification for a UVM verification challenge.
+    async def _generate_goal_with_ai_async(self, test: UVMTest) -> str:
+        """Generate task goal using AI (async)."""
+        prompt = f"""Create a task goal for a UVM verification challenge.
 
 Test name: {test.name}
 Test description: {test.description or 'Not available'}
 
-Write a concise goal statement (1-2 sentences) that tells the user what they need to accomplish.
+Write a concise goal statement (1-2 sentences) that tells what needs to be accomplished.
 The goal should mention:
 - Writing UVM test(s) and/or sequence(s)
 - Achieving coverage targets
 - The specific scenario being tested
 
-Keep it actionable and clear. Return ONLY the goal text."""
+Keep it actionable and clear.
+"""
 
         try:
-            response = self.client.messages.create(
-                model="claude-3-5-sonnet-20241022",
-                max_tokens=150,
-                temperature=0.6,
-                system="You are an expert verification engineer. Write clear, actionable goals.",
-                messages=[
-                    {"role": "user", "content": prompt}
-                ]
+            result = await query_with_pydantic_response(
+                prompt=prompt,
+                response_model=TaskGoal,
+                system_prompt="You are an expert verification engineer. Write clear, actionable goals.",
+                cwd=str(self.cwd)
             )
-
-            goal = response.content[0].text.strip()
-            goal = goal.strip('"\'')
-            return goal
+            return result.goal.strip().strip('"\'')
 
         except Exception as e:
             raise RuntimeError(f"AI goal generation failed: {e}") from e
 
     def _extract_hints_with_ai(self, test: UVMTest) -> list[str]:
-        """Extract helpful hints using AI.
+        """Extract helpful hints using AI."""
+        return asyncio.run(self._extract_hints_with_ai_async(test))
 
-        Args:
-            test: UVM test
-
-        Returns:
-            List of hint strings
-        """
-        # Read original test file for context
+    async def _extract_hints_with_ai_async(self, test: UVMTest) -> list[str]:
+        """Extract helpful hints using AI (async)."""
         test_code = ""
         if test.file_path.exists():
             with contextlib.suppress(Exception):
                 test_code = test.file_path.read_text()[:3000]
 
-        prompt = f"""You are creating hints for a UVM verification challenge.
+        prompt = f"""Create hints for a UVM verification challenge.
 
 Test name: {test.name}
 Base class: {test.base_class}
@@ -423,37 +449,23 @@ Test file snippet:
 {test_code}
 ```
 
-Generate 3-5 helpful hints that guide the implementer WITHOUT giving away the solution.
+Generate 3-5 helpful hints that guide WITHOUT giving away the solution.
 Hints should mention:
 - Which sequences to use or create
 - Configuration parameters to set
 - Key protocol features to exercise
 - Testing strategies or patterns
-
-Return a JSON array of hint strings.
-Example: ["Use the base write sequence with 8-bit data width", "Configure address range to cover low addresses", "Verify strobe signals match data width"]
 """
 
         try:
-            response = self.client.messages.create(
-                model="claude-3-5-sonnet-20241022",
-                max_tokens=400,
-                temperature=0.7,
-                system="You are an expert verification engineer. Provide helpful but not overly explicit hints.",
-                messages=[
-                    {"role": "user", "content": prompt}
-                ]
+            result = await query_with_pydantic_response(
+                prompt=prompt,
+                response_model=TaskHints,
+                system_prompt="You are an expert verification engineer. Provide helpful but not overly explicit hints.",
+                cwd=str(self.cwd)
             )
-
-            content = response.content[0].text.strip()
-            # Extract JSON if wrapped in markdown
-            if "```json" in content:
-                content = content.split("```json")[1].split("```")[0].strip()
-            elif "```" in content:
-                content = content.split("```")[1].split("```")[0].strip()
-
-            hints = json.loads(content)
-            return hints if isinstance(hints, list) else [hints]
+            return result.hints
 
         except Exception as e:
-            raise RuntimeError(f"AI hints generation failed: {e}") from e
+            print(f"[TaskGen] Warning: Hints generation failed for {test.name}: {e}")
+            return []
