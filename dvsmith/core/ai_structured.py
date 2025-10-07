@@ -2,7 +2,7 @@
 
 import json
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Type, TypeVar, Optional, Any
 from pydantic import BaseModel
@@ -44,7 +44,7 @@ def log_ai_call(
         AI_LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
 
         log_entry = {
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "prompt": prompt[:500],  # Truncate long prompts
             "response_model": response_model_name,
             "schema": schema,
