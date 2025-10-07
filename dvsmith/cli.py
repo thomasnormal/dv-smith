@@ -299,7 +299,7 @@ class DVSmith:
 
         task_gen = TaskGenerator(analysis, profile)
         smoke_tests = profile.get("grading", {}).get("smoke_tests", [])
-        tasks = task_gen.generate_tasks_multi(tasks_dir, modes=selected_categories, smoke_tests=smoke_tests)
+        tasks = task_gen.generate_tasks(tasks_dir, smoke_tests=smoke_tests)
 
         print(f"  Generated {len(tasks)} tasks")
 
