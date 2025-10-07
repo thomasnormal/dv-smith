@@ -1,12 +1,39 @@
 """Intelligent gym cleaning and validation using Claude Code SDK."""
 
 import asyncio
-import json
-import re
 from pathlib import Path
 from typing import Any
 
-from claude_agent_sdk import query, ClaudeAgentOptions, AssistantMessage, TextBlock
+from claude_agent_sdk import query, ClaudeAgentOptions, AssistantMessage
+from pydantic import BaseModel, Field
+
+from .ai_structured import query_with_pydantic_response
+
+
+class ValidationResult(BaseModel):
+    """Result of testbench validation."""
+    compilation: bool = Field(
+        description="True if compilation succeeded, False otherwise"
+    )
+    base_test_exists: bool = Field(
+        description="True if base test file exists"
+    )
+    missing_files: list[str] = Field(
+        default_factory=list,
+        description="List of missing file names that caused compilation to fail"
+    )
+    errors: list[str] = Field(
+        default_factory=list,
+        description="List of error messages from compilation"
+    )
+
+
+class FileList(BaseModel):
+    """List of files to keep."""
+    files_to_keep: list[str] = Field(
+        default_factory=list,
+        description="List of absolute file paths that must be kept for testbench to compile"
+    )
 
 
 class GymCleaner:
@@ -73,39 +100,20 @@ Files that MUST be kept include:
 - All sequence directories and their packages
 - Any supporting infrastructure files
 
-Use Read, Glob, and Grep tools to explore the directory structure.
-
-**Return Format:**
-Provide a clear list of absolute file paths to KEEP (not remove), one per line.
-Example:
-/path/to/gym/src/hvl_top/test/apb_test_pkg.sv
-/path/to/gym/src/hvl_top/test/sequences/master_sequences/apb_master_seq_pkg.sv
+Explore the directory structure and return the list of absolute file paths to keep.
 """
 
-        options = ClaudeAgentOptions(
-            allowed_tools=["Read", "Glob", "Grep"],
-            cwd=str(self.gym_dir),
-            permission_mode="bypassPermissions",
-            max_turns=5
-        )
-
         files_to_keep = []
-        sdk_success = False
         try:
-            async for message in query(prompt=prompt, options=options):
-                if isinstance(message, AssistantMessage):
-                    for block in message.content:
-                        if isinstance(block, TextBlock):
-                            # Extract file list from Claude's response
-                            found_files = self._parse_file_list(block.text)
-                            if found_files:
-                                sdk_success = True
-                            files_to_keep.extend(found_files)
+            result = await query_with_pydantic_response(
+                prompt=prompt,
+                response_model=FileList,
+                system_prompt="You are an expert in UVM testbench structure.",
+                cwd=str(self.gym_dir)
+            )
+            files_to_keep = result.files_to_keep
         except Exception as e:
             print(f"[GymCleaner] Warning: SDK query failed: {e}")
-            sdk_success = False
-
-        if not sdk_success:
             print("[GymCleaner] Falling back to heuristic patterns...")
             # Fallback: use simple patterns
             if test_dir.exists():
@@ -191,74 +199,38 @@ Example:
 3. Check compilation log for errors (look for *E,* or Error patterns)
 
 **IMPORTANT:**
-- If compilation fails due to missing files, list which files are missing
+- If compilation fails due to missing files, list which files are missing in the missing_files array
 - Check if test packages and sequence packages exist
-- Return structured results
+- Set compilation to true only if compilation succeeded with no errors
+- Set base_test_exists to true if you find the base test file
 
-**Return Format (JSON):**
-{{
-  "compilation": true/false,
-  "base_test_exists": true/false,
-  "missing_files": ["list of missing file names"],
-  "errors": ["list of error messages from compilation"]
-}}
+Analyze the testbench and return your findings.
 """
 
-        options = ClaudeAgentOptions(
-            allowed_tools=["Read", "Bash", "Glob", "Grep"],
-            cwd=str(self.gym_dir),
-            permission_mode="acceptEdits",  # Allow running compilation
-            max_turns=15  # Increased from 8 to allow more thorough checking
-        )
-
-        results = {
-            "compilation": False,
-            "base_test_exists": False,
-            "smoke_test_passed": False,
-            "missing_files": [],
-            "errors": [],
-            "agent_responses": []  # Track what agent actually said
-        }
-
         try:
-            import asyncio
-            # Add timeout to prevent hanging
-            async def run_with_timeout():
-                async for message in query(prompt=prompt, options=options):
-                    if isinstance(message, AssistantMessage):
-                        for block in message.content:
-                            if isinstance(block, TextBlock):
-                                # Save agent response for debugging
-                                results["agent_responses"].append(block.text[:500])
-
-                                # Parse Claude's structured response
-                                parsed = self._parse_validation_results(block.text)
-
-                                # Log if JSON parsing failed
-                                if not parsed and block.text:
-                                    print(f"[GymCleaner] Debug: Agent response (first 200 chars): {block.text[:200]}")
-
-                                # Merge results (keep most pessimistic values)
-                                results["compilation"] = results["compilation"] or parsed.get("compilation", False)
-                                results["base_test_exists"] = results["base_test_exists"] or parsed.get("base_test_exists", False)
-                                results["missing_files"].extend(parsed.get("missing_files", []))
-                                results["errors"].extend(parsed.get("errors", []))
-
-            # Run with 120 second timeout
-            await asyncio.wait_for(run_with_timeout(), timeout=120.0)
-
-        except asyncio.TimeoutError:
-            print(f"[GymCleaner] Warning: Verification timed out after 120 seconds")
-            results["errors"].append("Verification timed out")
+            result = await query_with_pydantic_response(
+                prompt=prompt,
+                response_model=ValidationResult,
+                system_prompt="You are an expert in UVM testbench validation.",
+                cwd=str(self.gym_dir)
+            )
+            
+            return {
+                "compilation": result.compilation,
+                "base_test_exists": result.base_test_exists,
+                "smoke_test_passed": False,  # Not tested yet
+                "missing_files": result.missing_files,
+                "errors": result.errors
+            }
         except Exception as e:
             print(f"[GymCleaner] Warning: Validation failed: {e}")
-            results["errors"].append(f"Validation exception: {str(e)}")
-
-        # Deduplicate lists
-        results["missing_files"] = list(set(results["missing_files"]))
-        results["errors"] = list(set(results["errors"]))
-
-        return results
+            return {
+                "compilation": False,
+                "base_test_exists": False,
+                "smoke_test_passed": False,
+                "missing_files": [],
+                "errors": [f"Validation exception: {str(e)}"]
+            }
 
     def verify_integrity(self, profile: dict) -> dict[str, Any]:
         """Synchronous wrapper for verify_integrity_async.
@@ -477,86 +449,4 @@ This is the file you must edit to add your test!
         print(f"[GymCleaner] Created {howto_path}")
         return howto_path
 
-    def _parse_file_list(self, text: str) -> list[str]:
-        """Extract file paths from Claude's response.
 
-        Args:
-            text: Claude's response text
-
-        Returns:
-            List of file paths
-        """
-        files = []
-
-        # Try JSON extraction first
-        try:
-            json_match = re.search(r'\[([^\]]+)\]', text, re.DOTALL)
-            if json_match:
-                data = json.loads(json_match.group(0))
-                if isinstance(data, list):
-                    return [str(f) for f in data if isinstance(f, str)]
-        except Exception:
-            pass
-
-        # Fall back to line-by-line extraction
-        for line in text.split('\n'):
-            # Look for file paths (containing .sv or .svh)
-            if '.sv' in line or '.svh' in line:
-                # Extract path-like strings
-                path_match = re.search(r'(/[\w/\-\.]+\.(?:sv|svh))', line)
-                if path_match:
-                    files.append(path_match.group(1))
-                else:
-                    # Try relative path
-                    path_match = re.search(r'([\w/\-\.]+\.(?:sv|svh))', line)
-                    if path_match:
-                        path = path_match.group(1)
-                        # Make absolute
-                        if not path.startswith('/'):
-                            path = str(self.gym_dir / path)
-                        files.append(path)
-
-        return files
-
-    def _parse_validation_results(self, text: str) -> dict[str, Any]:
-        """Parse validation results from Claude's response.
-
-        Args:
-            text: Claude's response text
-
-        Returns:
-            Dictionary with validation results
-        """
-        # Try to extract JSON block
-        try:
-            json_match = re.search(r'\{[^}]+\}', text, re.DOTALL)
-            if json_match:
-                return json.loads(json_match.group(0))
-        except Exception:
-            pass
-
-        # Fallback to heuristic parsing
-        text_lower = text.lower()
-
-        compilation_success = any(
-            phrase in text_lower
-            for phrase in ["compilation success", "compile successful", "no errors"]
-        )
-
-        base_test_exists = any(
-            phrase in text_lower
-            for phrase in ["base test found", "base_test.sv exists", "base test exists"]
-        )
-
-        # Extract error messages
-        errors = []
-        for line in text.split('\n'):
-            if any(err in line.lower() for err in ["error:", "*e,*", "failed", "missing"]):
-                errors.append(line.strip())
-
-        return {
-            "compilation": compilation_success and not errors,
-            "base_test_exists": base_test_exists,
-            "missing_files": [],
-            "errors": errors[:5]  # Limit to 5 errors
-        }

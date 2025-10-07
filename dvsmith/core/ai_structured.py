@@ -81,26 +81,16 @@ async def query_with_pydantic_response(
     Returns:
         Validated instance of response_model
     """
-    # Build JSON Schema from Pydantic model or generic type
-    if hasattr(response_model, 'model_json_schema'):
-        # Pydantic model
-        schema = response_model.model_json_schema()
-        if "type" not in schema:
-            schema = {"type": "object", **schema}
-        schema.setdefault("additionalProperties", False)
-    else:
-        # Handle generic types like list[str]
-        import typing
-        origin = typing.get_origin(response_model)
-        if origin is list:
-            args = typing.get_args(response_model)
-            item_type = args[0] if args else str
-            schema = {
-                "type": "array",
-                "items": {"type": "string"} if item_type is str else {"type": "object"}
-            }
-        else:
-            raise ValueError(f"Unsupported response_model type: {response_model}")
+    # Build JSON Schema from Pydantic model
+    schema = response_model.model_json_schema()
+    
+    # Extract only the properties and required fields for the tool schema
+    # The tool parameters should match the model's fields directly
+    tool_schema = {
+        "type": "object",
+        "properties": schema.get("properties", {}),
+        "required": schema.get("required", []),
+    }
 
     final_obj: Optional[ModelT] = None
     start_time = time.time()
@@ -113,8 +103,9 @@ async def query_with_pydantic_response(
     # Define the FinalAnswer tool
     @tool(
         "FinalAnswer",
-        "Return the final answer as JSON that matches the required schema.",
-        schema,
+        "Return the final answer as JSON that matches the required schema. "
+        "Pass the fields directly as tool parameters, not wrapped in any container.",
+        tool_schema,
     )
     async def final_answer(args: dict[str, Any]) -> dict[str, Any]:
         return {"content": [{"type": "text", "text": "received"}]}
@@ -128,77 +119,8 @@ async def query_with_pydantic_response(
         nonlocal final_obj
         if input_data.get("tool_name") == "mcp__answer__FinalAnswer":
             tool_input = input_data["tool_input"]
-
-            # The SDK wraps data in various wrapper keys with JSON string values
-            # Wrapper keys seen: parameter, additionalProperties, answer, parameters
-            wrapper_keys = ["parameter", "additionalProperties", "answer", "parameters"]
-
-            if isinstance(tool_input, dict) and len(tool_input) == 1:
-                key = list(tool_input.keys())[0]
-                if key in wrapper_keys:
-                    value = tool_input[key]
-                    if isinstance(value, str):
-                        # Parse JSON string
-                        tool_input = json.loads(value)
-                    else:
-                        # Use value directly
-                        tool_input = value
-
-            # Check if we're expecting a FilesEnvelope or list type
-            import typing
-            from pydantic import RootModel, BaseModel
-
-            def _is_files_envelope(model) -> bool:
-                return (isinstance(model, type) and issubclass(model, BaseModel) and
-                        hasattr(model, "model_fields") and "files" in model.model_fields and
-                        model.__name__ == "FilesEnvelope")
-
-            origin = typing.get_origin(response_model)
-            args = typing.get_args(response_model)
-
-            # Detect if response_model is list[str] or RootModel[list[str]]
-            is_root = isinstance(response_model, type) and issubclass(response_model, RootModel)
-            expects_list = (origin is list and (not args or args[0] is str)) or is_root
-
-            # If expecting FilesEnvelope, normalize common shapes into the envelope
-            if _is_files_envelope(response_model):
-                if isinstance(tool_input, list):
-                    # Bare list - wrap in envelope
-                    tool_input = {"kind": "dvsmith.files.v1", "files": tool_input}
-                elif isinstance(tool_input, dict) and "files" not in tool_input:
-                    # Accept common wrappers
-                    for k in ("test_files", "paths", "items", "list", "data"):
-                        if isinstance(tool_input.get(k), list):
-                            tool_input = {"kind": "dvsmith.files.v1", "files": tool_input[k]}
-                            break
-            # If expecting a list but got a dict wrapper, unwrap it
-            elif expects_list and isinstance(tool_input, dict):
-                # First try common wrapper keys
-                for k in ("test_files", "files", "paths", "items", "list", "data"):
-                    v = tool_input.get(k)
-                    if isinstance(v, list):
-                        tool_input = v
-                        break
-                else:
-                    # Fallback: find the first list of strings in any value
-                    for v in tool_input.values():
-                        if isinstance(v, list) and all(isinstance(x, str) for x in v):
-                            tool_input = v
-                            break
-
-            # Validate based on response_model type
-            if hasattr(response_model, 'model_validate'):
-                # Pydantic model (including RootModel)
-                final_obj = response_model.model_validate(tool_input)
-            else:
-                # Generic type (e.g., list[str])
-                if expects_list:
-                    if isinstance(tool_input, list):
-                        final_obj = tool_input
-                    else:
-                        raise ValueError(f"Expected list[str], got {type(tool_input)}")
-                else:
-                    raise ValueError(f"Expected {response_model}, got {type(tool_input)}")
+            # Validate directly - tool must return data matching schema exactly
+            final_obj = response_model.model_validate(tool_input)
         return {}
 
     # Block stop until FinalAnswer is called

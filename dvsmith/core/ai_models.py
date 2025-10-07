@@ -110,3 +110,27 @@ class CovergroupSelection(BaseModel):
         default_factory=list,
         description="List of 2-4 relevant covergroup names from the available list"
     )
+
+
+class CompleteTaskMetadata(BaseModel):
+    """Complete task metadata generated in a single AI call."""
+    task_name: str = Field(
+        description="Human-readable task name (2-5 words, clear and professional)"
+    )
+    difficulty: str = Field(
+        description="Difficulty level: EASY, MEDIUM, or HARD"
+    )
+    description: str = Field(
+        description="Clear, detailed task description (2-4 sentences) explaining what needs to be verified"
+    )
+    goal: str = Field(
+        description="Concise goal statement (1-2 sentences) telling what needs to be accomplished"
+    )
+    hints: list[str] = Field(
+        default_factory=list,
+        description="List of 3-5 helpful hints that guide without giving away the solution"
+    )
+    covergroups: list[str] = Field(
+        default_factory=list,
+        description="List of 2-4 relevant covergroup names from the available list for this test"
+    )

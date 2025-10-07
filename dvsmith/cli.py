@@ -149,6 +149,9 @@ class DVSmith:
         # Generate profile
         print("[dv-smith] Generating profile...")
         profile = self._generate_profile(name, repo_path, analysis)
+        
+        # Cache the full analysis to avoid re-analyzing in build
+        profile['_analysis_cache'] = analysis.to_dict()
 
         profile_path = self.profiles_dir / f"{name}.yaml"
         with open(profile_path, "w") as f:
@@ -191,22 +194,34 @@ class DVSmith:
         gym_dir = self.gyms_dir / name
         gym_dir.mkdir(exist_ok=True, parents=True)
 
-        # Re-analyze to get test details (needed for task generation)
-        print("[dv-smith] Re-analyzing repository...")
-
-        # Check for Anthropic API key
+        # Check for Anthropic API key (needed for task generation)
         if not os.getenv("ANTHROPIC_API_KEY"):
-            print("[ERROR] ANTHROPIC_API_KEY environment variable is required")
+            print("[ERROR] ANTHROPIC_API_KEY environment variable is required for task generation")
             print("[ERROR] Set it with: export ANTHROPIC_API_KEY=your-key-here")
             sys.exit(1)
 
-        try:
-            ai_analyzer = AIRepoAnalyzer(repo_path)
-            analysis = ai_analyzer.analyze()
-        except Exception as e:
-            print(f"[ERROR] AI analysis failed: {e}")
-            print("[ERROR] Please check your ANTHROPIC_API_KEY and try again")
-            sys.exit(1)
+        # Try to load cached analysis from profile
+        if '_analysis_cache' in profile:
+            print("[dv-smith] Loading cached analysis from profile...")
+            try:
+                from .core.models import RepoAnalysis
+                analysis = RepoAnalysis.from_dict(profile['_analysis_cache'], repo_root=repo_path)
+                print(f"  ✓ Loaded {len(analysis.tests)} tests from cache")
+            except Exception as e:
+                print(f"  ⚠️  Cache load failed: {e}")
+                print("[dv-smith] Re-analyzing repository...")
+                ai_analyzer = AIRepoAnalyzer(repo_path)
+                analysis = ai_analyzer.analyze()
+        else:
+            # No cache, need to analyze
+            print("[dv-smith] No cached analysis found, analyzing repository...")
+            try:
+                ai_analyzer = AIRepoAnalyzer(repo_path)
+                analysis = ai_analyzer.analyze()
+            except Exception as e:
+                print(f"[ERROR] AI analysis failed: {e}")
+                print("[ERROR] Please check your ANTHROPIC_API_KEY and try again")
+                sys.exit(1)
 
         # Step 1: Copy source structure (including tests - we'll clean intelligently)
         print("[dv-smith] Step 1: Setting up gym structure...")

@@ -1,7 +1,7 @@
 # DV-Smith: SystemVerilog/UVM Verification Gym Generator
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 
 **DV-Smith** is a framework that automatically converts SystemVerilog/UVM testbenches into containerized verification tasks (DV gyms), enabling AI agents and automated tools to learn and improve hardware verification.
 
@@ -30,7 +30,7 @@ DV-Smith is a **DV gym generator** that:
 
 ### Prerequisites
 
-- Python 3.8+
+- Python 3.10+
 - One or more EDA simulators:
   - Cadence Xcelium
   - Mentor Questa/ModelSim

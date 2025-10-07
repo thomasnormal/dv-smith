@@ -191,6 +191,78 @@ class RepoAnalysis:
         """Find test by name."""
         return next((t for t in self.tests if t.name == name), None)
 
+    def to_dict(self) -> dict:
+        """Serialize to dictionary for caching."""
+        return {
+            "tests": [
+                {
+                    "name": t.name,
+                    "file_path": str(t.file_path),
+                    "base_class": t.base_class,
+                    "sequences_used": t.sequences_used,
+                    "description": t.description,
+                    "line_number": t.line_number
+                }
+                for t in self.tests
+            ],
+            "sequences": [
+                {
+                    "name": s.name,
+                    "file_path": str(s.file_path),
+                    "base_class": s.base_class,
+                    "description": s.description,
+                    "line_number": s.line_number
+                }
+                for s in self.sequences
+            ],
+            "covergroups": self.covergroups,
+            "build_system": self.build_system.value if self.build_system else None,
+            "detected_simulators": [s.value for s in self.detected_simulators],
+            "repo_root": str(self.repo_root) if self.repo_root else None,
+            "tests_dir": str(self.tests_dir) if self.tests_dir else None,
+            "sequences_dir": str(self.sequences_dir) if self.sequences_dir else None,
+            "env_dir": str(self.env_dir) if self.env_dir else None,
+            "agents_dir": str(self.agents_dir) if self.agents_dir else None,
+        }
+
+    @staticmethod
+    def from_dict(data: dict, repo_root: Optional[Path] = None) -> "RepoAnalysis":
+        """Deserialize from dictionary."""
+        # Use provided repo_root or from data
+        root = Path(repo_root) if repo_root else (Path(data["repo_root"]) if data.get("repo_root") else None)
+        
+        return RepoAnalysis(
+            tests=[
+                UVMTest(
+                    name=t["name"],
+                    file_path=Path(t["file_path"]),
+                    base_class=t["base_class"],
+                    sequences_used=t.get("sequences_used", []),
+                    description=t.get("description"),
+                    line_number=t.get("line_number")
+                )
+                for t in data.get("tests", [])
+            ],
+            sequences=[
+                UVMSequence(
+                    name=s["name"],
+                    file_path=Path(s["file_path"]),
+                    base_class=s["base_class"],
+                    description=s.get("description"),
+                    line_number=s.get("line_number")
+                )
+                for s in data.get("sequences", [])
+            ],
+            covergroups=data.get("covergroups", []),
+            build_system=BuildSystem(data["build_system"]) if data.get("build_system") else None,
+            detected_simulators=[Simulator(s) for s in data.get("detected_simulators", [])],
+            repo_root=root,
+            tests_dir=Path(data["tests_dir"]) if data.get("tests_dir") else None,
+            sequences_dir=Path(data["sequences_dir"]) if data.get("sequences_dir") else None,
+            env_dir=Path(data["env_dir"]) if data.get("env_dir") else None,
+            agents_dir=Path(data["agents_dir"]) if data.get("agents_dir") else None,
+        )
+
 
 @dataclass
 class AcceptanceCriteria:
