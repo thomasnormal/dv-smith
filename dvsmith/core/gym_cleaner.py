@@ -15,46 +15,37 @@ logger = get_logger(__name__)
 
 class PackageCleanupResult(BaseModel):
     """Result of package file cleanup."""
+
     modified_files: list[str] = Field(
-        default_factory=list,
-        description="List of package files that were modified"
+        default_factory=list, description="List of package files that were modified"
     )
     removed_includes: list[str] = Field(
-        default_factory=list,
-        description="List of include statements that were removed"
+        default_factory=list, description="List of include statements that were removed"
     )
-    success: bool = Field(
-        description="True if cleanup completed successfully"
-    )
-    notes: str = Field(
-        default="",
-        description="Any notes or warnings about the cleanup"
-    )
+    success: bool = Field(description="True if cleanup completed successfully")
+    notes: str = Field(default="", description="Any notes or warnings about the cleanup")
 
 
 class ValidationResult(BaseModel):
     """Result of testbench validation."""
-    compilation: bool = Field(
-        description="True if compilation succeeded, False otherwise"
-    )
-    base_test_exists: bool = Field(
-        description="True if base test file exists"
-    )
+
+    compilation: bool = Field(description="True if compilation succeeded, False otherwise")
+    base_test_exists: bool = Field(description="True if base test file exists")
     missing_files: list[str] = Field(
         default_factory=list,
-        description="List of missing file names that caused compilation to fail"
+        description="List of missing file names that caused compilation to fail",
     )
     errors: list[str] = Field(
-        default_factory=list,
-        description="List of error messages from compilation"
+        default_factory=list, description="List of error messages from compilation"
     )
 
 
 class FileList(BaseModel):
     """List of files to keep."""
+
     files_to_keep: list[str] = Field(
         default_factory=list,
-        description="List of absolute file paths that must be kept for testbench to compile"
+        description="List of absolute file paths that must be kept for testbench to compile",
     )
 
 
@@ -87,9 +78,9 @@ class GymCleaner:
         for test_file in test_files:
             filename = test_file.name.lower()
             # Keep base tests and package files
-            if 'base' in filename and 'test' in filename:
+            if "base" in filename and "test" in filename:
                 files_to_keep_pre.append(str(test_file))
-            elif '_pkg' in filename:
+            elif "_pkg" in filename:
                 files_to_keep_pre.append(str(test_file))
             else:
                 files_to_remove.append(test_file)
@@ -131,7 +122,7 @@ Explore the directory structure and return the list of absolute file paths to ke
                 prompt=prompt,
                 response_model=FileList,
                 system_prompt="You are an expert in UVM testbench structure.",
-                cwd=str(self.gym_dir)
+                cwd=str(self.gym_dir),
             )
             files_to_keep = result.files_to_keep
         except Exception as e:
@@ -180,7 +171,7 @@ Explore the directory structure and return the list of absolute file paths to ke
                 "compilation": False,
                 "base_test_exists": False,
                 "smoke_test_passed": False,
-                "errors": ["No simulators configured"]
+                "errors": ["No simulators configured"],
             }
 
         # Find an available simulator directory and check if tools are installed
@@ -200,6 +191,7 @@ Explore the directory structure and return the list of absolute file paths to ke
             if candidate_dir.exists():
                 # Check if simulator tools are actually available
                 import subprocess
+
                 tool_check = None
                 if sim == "xcelium":
                     tool_check = "xrun"
@@ -207,10 +199,12 @@ Explore the directory structure and return the list of absolute file paths to ke
                     tool_check = "vsim"
                 elif sim == "vcs":
                     tool_check = "vcs"
-                
+
                 if tool_check:
                     try:
-                        result = subprocess.run(["which", tool_check], capture_output=True, timeout=5)
+                        result = subprocess.run(
+                            ["which", tool_check], capture_output=True, timeout=5
+                        )
                         if result.returncode == 0:
                             sim_tool = sim
                             sim_tool_dir = candidate_dir
@@ -224,9 +218,9 @@ Explore the directory structure and return the list of absolute file paths to ke
                 "compilation": False,
                 "base_test_exists": False,
                 "smoke_test_passed": False,
-                "errors": ["No available simulator tools found (check PATH)"]
+                "errors": ["No available simulator tools found (check PATH)"],
             }
-        
+
         logger.info(f"Using {sim_tool} for validation at {sim_tool_dir}")
 
         prompt = f"""Verify this UVM testbench is properly set up for DV-Smith gym.
@@ -254,15 +248,15 @@ Analyze the testbench and return your findings.
                 prompt=prompt,
                 response_model=ValidationResult,
                 system_prompt="You are an expert in UVM testbench validation.",
-                cwd=str(self.gym_dir)
+                cwd=str(self.gym_dir),
             )
-            
+
             return {
                 "compilation": result.compilation,
                 "base_test_exists": result.base_test_exists,
                 "smoke_test_passed": False,  # Not tested yet
                 "missing_files": result.missing_files,
-                "errors": result.errors
+                "errors": result.errors,
             }
         except Exception as e:
             logger.warning(f"Validation failed: {e}")
@@ -271,7 +265,7 @@ Analyze the testbench and return your findings.
                 "base_test_exists": False,
                 "smoke_test_passed": False,
                 "missing_files": [],
-                "errors": [f"Validation exception: {str(e)}"]
+                "errors": [f"Validation exception: {str(e)}"],
             }
 
     def verify_integrity(self, profile: dict) -> dict[str, Any]:
@@ -328,9 +322,9 @@ Use the edit_file tool to make the changes. Return the list of modified files.
                 prompt=prompt,
                 response_model=PackageCleanupResult,
                 system_prompt="You are an expert in UVM package file structure and include management.",
-                cwd=str(self.gym_dir)
+                cwd=str(self.gym_dir),
             )
-            
+
             modified_files = result.modified_files
             if not result.success and result.notes:
                 errors.append(result.notes)
@@ -340,10 +334,7 @@ Use the edit_file tool to make the changes. Return the list of modified files.
             logger.error(error_msg)
             errors.append(error_msg)
 
-        return {
-            "modified_files": modified_files,
-            "errors": errors
-        }
+        return {"modified_files": modified_files, "errors": errors}
 
     def clean_package_includes(self, removed_test_names: list[str]) -> dict[str, Any]:
         """Synchronous wrapper for clean_package_includes_async.
@@ -477,10 +468,8 @@ This is the file you must edit to add your test!
 
         howto_path = self.gym_dir / "HOWTO.md"
 
-        with open(howto_path, 'w') as f:
+        with open(howto_path, "w") as f:
             f.write(howto_content)
 
         logger.info(f"Created {howto_path}")
         return howto_path
-
-

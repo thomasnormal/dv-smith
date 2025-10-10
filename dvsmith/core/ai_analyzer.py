@@ -75,7 +75,7 @@ class AIRepoAnalyzer:
                 sequences=sequences,
                 covergroups=covergroups,
                 build_system=build_info.get("build_system"),
-                detected_simulators=build_info.get("simulators", [])
+                detected_simulators=build_info.get("simulators", []),
             )
 
         # Set directory paths
@@ -102,7 +102,7 @@ class AIRepoAnalyzer:
                 ["tree", "-L", "4", "-I", ".git|work|*.log|*.ucdb", str(self.repo_root)],
                 capture_output=True,
                 text=True,
-                timeout=10  # Reduced from 30s
+                timeout=10,  # Reduced from 30s
             )
             if result.returncode == 0:
                 return result.stdout
@@ -115,7 +115,7 @@ class AIRepoAnalyzer:
                 ["find", str(self.repo_root), "-type", "f", "-name", "*.sv"],
                 capture_output=True,
                 text=True,
-                timeout=15  # Reduced from 30s
+                timeout=15,  # Reduced from 30s
             )
             return result.stdout
         except:
@@ -161,14 +161,18 @@ class AIRepoAnalyzer:
                         try:
                             # Read first 3000 chars to check for test class indicators
                             # (handles files with long license headers)
-                            content = sv_file.read_text(encoding='utf-8', errors='ignore')[:3000]
+                            content = sv_file.read_text(encoding="utf-8", errors="ignore")[:3000]
                             content_lower = content.lower()
 
                             # Check for UVM test class patterns (tighter check)
-                            has_class_extends = bool(re.search(r"class\s+\w+\s+extends\s+([a-zA-Z_][\w:#]*)", content, re.I))
+                            has_class_extends = bool(
+                                re.search(
+                                    r"class\s+\w+\s+extends\s+([a-zA-Z_][\w:#]*)", content, re.I
+                                )
+                            )
                             is_test = has_class_extends and (
-                                "uvm_test" in content_lower or
-                                bool(re.search(r"extends\s+\w*_test\b", content, re.I))
+                                "uvm_test" in content_lower
+                                or bool(re.search(r"extends\s+\w*_test\b", content, re.I))
                             )
 
                             if is_test:
@@ -181,12 +185,14 @@ class AIRepoAnalyzer:
                         # Sample files and count
                         samples = [f.name for f in test_files[:3]]
                         priority = "HIGH" if "src" in str(rel) or "hvl" in str(rel) else "LOW"
-                        test_dir_candidates.append({
-                            "path": str(rel),
-                            "count": len(test_files),
-                            "samples": samples,
-                            "priority": priority
-                        })
+                        test_dir_candidates.append(
+                            {
+                                "path": str(rel),
+                                "count": len(test_files),
+                                "samples": samples,
+                                "priority": priority,
+                            }
+                        )
 
                         # Short-circuit if we have enough good candidates
                         if len(test_dir_candidates) >= 10:
@@ -199,18 +205,22 @@ class AIRepoAnalyzer:
 
         # If we found exactly one test directory, use it directly (no need for AI to choose)
         if len(test_dir_candidates) == 1:
-            logger.info(f"[AI Analyzer] Found single test directory: {test_dir_candidates[0]['path']}")
+            logger.info(
+                f"[AI Analyzer] Found single test directory: {test_dir_candidates[0]['path']}"
+            )
             return DirectoryInfo(
-                tests_dir=test_dir_candidates[0]['path'],
+                tests_dir=test_dir_candidates[0]["path"],
                 sequences_dir=None,
                 env_dir=None,
-                agents_dir=None
+                agents_dir=None,
             )
 
         # Call async version
         return asyncio.run(self._identify_directories_async(file_tree, test_dir_candidates))
 
-    async def _identify_directories_async(self, file_tree: str, test_dir_candidates: list[dict]) -> DirectoryInfo:
+    async def _identify_directories_async(
+        self, file_tree: str, test_dir_candidates: list[dict]
+    ) -> DirectoryInfo:
         """Use AI to identify key directories (async).
 
         Args:
@@ -223,7 +233,9 @@ class AIRepoAnalyzer:
         # Format for prompt
         test_dir_info = []
         for c in test_dir_candidates[:10]:
-            test_dir_info.append(f"{c['path']} [{c['priority']} priority, {c['count']} tests: {', '.join(c['samples'])}]")
+            test_dir_info.append(
+                f"{c['path']} [{c['priority']} priority, {c['count']} tests: {', '.join(c['samples'])}]"
+            )
 
         prompt = f"""Analyze this SystemVerilog/UVM repository and identify the COMPLETE EXACT directory paths.
 
@@ -251,18 +263,22 @@ CRITICAL RULES:
                 prompt=prompt,
                 response_model=DirectoryInfo,
                 system_prompt="You are an expert in SystemVerilog and UVM testbench structure.",
-                cwd=str(self.repo_root)
+                cwd=str(self.repo_root),
             )
 
             # Validate that the tests_dir actually exists
             if result.tests_dir:
                 test_path = self.repo_root / result.tests_dir
                 if not test_path.exists():
-                    logger.warning(f"[AI Analyzer] Warning: AI suggested non-existent path: {result.tests_dir}")
+                    logger.warning(
+                        f"[AI Analyzer] Warning: AI suggested non-existent path: {result.tests_dir}"
+                    )
                     # Use first candidate we actually found
                     if test_dir_candidates:
-                        logger.info(f"[AI Analyzer] Using first discovered directory instead: {test_dir_candidates[0]['path']}")
-                        result.tests_dir = test_dir_candidates[0]['path']
+                        logger.info(
+                            f"[AI Analyzer] Using first discovered directory instead: {test_dir_candidates[0]['path']}"
+                        )
+                        result.tests_dir = test_dir_candidates[0]["path"]
                     else:
                         result.tests_dir = None
 
@@ -272,12 +288,14 @@ CRITICAL RULES:
             logger.warning(f"[AI Analyzer] Warning: Could not parse directory info: {e}")
             # Fallback to first candidate if available
             if test_dir_candidates:
-                logger.info(f"[AI Analyzer] Using first discovered directory as fallback: {test_dir_candidates[0]['path']}")
+                logger.info(
+                    f"[AI Analyzer] Using first discovered directory as fallback: {test_dir_candidates[0]['path']}"
+                )
                 return DirectoryInfo(
-                    tests_dir=test_dir_candidates[0]['path'],
+                    tests_dir=test_dir_candidates[0]["path"],
                     sequences_dir=None,
                     env_dir=None,
-                    agents_dir=None
+                    agents_dir=None,
                 )
             return DirectoryInfo(tests_dir=None, sequences_dir=None, env_dir=None, agents_dir=None)
 
@@ -300,10 +318,7 @@ CRITICAL RULES:
         # Get full directory tree for AI to analyze
         try:
             result = subprocess.run(
-                ["ls", "-R", str(tests_path)],
-                capture_output=True,
-                text=True,
-                timeout=10
+                ["ls", "-R", str(tests_path)], capture_output=True, text=True, timeout=10
             )
             dir_tree = result.stdout[:2000]  # First 2k chars of tree
         except:
@@ -381,7 +396,7 @@ Return format (STRICT):
                 prompt=prompt,
                 response_model=FilesEnvelope,
                 system_prompt="You are an expert in UVM directory structures.",
-                cwd=str(tests_path.resolve())
+                cwd=str(tests_path.resolve()),
             )
 
             file_paths = result.files
@@ -409,9 +424,13 @@ Return format (STRICT):
                         # Try relative to tests_path (strip common prefixes)
                         fpath_str = str(fpath)
                         # Remove workspace prefix if present
-                        for prefix in ["dvsmith_workspace/clones/", "workspace/clones/", str(self.repo_root.name) + "/"]:
+                        for prefix in [
+                            "dvsmith_workspace/clones/",
+                            "workspace/clones/",
+                            str(self.repo_root.name) + "/",
+                        ]:
                             if fpath_str.startswith(prefix):
-                                fpath_str = fpath_str[len(prefix):]
+                                fpath_str = fpath_str[len(prefix) :]
                                 break
 
                         # Try with just the filename relative to tests_path
@@ -483,7 +502,7 @@ Return format (STRICT):
         m = re.search(r"(?:\/\/[^\n]*\n){0,3}\s*class\s+" + re.escape(cls) + r"\b", content)
         if not m:
             return None
-        snippet = content[max(0, m.start()-300):m.start()]
+        snippet = content[max(0, m.start() - 300) : m.start()]
         cm = re.findall(r"\/\/\s*(.+)", snippet)
         return cm[-1].strip() if cm else None
 
@@ -522,7 +541,7 @@ If this IS a valid UVM test class, extract:
                 prompt=prompt,
                 response_model=TestInfo,
                 system_prompt="You are an expert in SystemVerilog/UVM.",
-                cwd=str(self.repo_root)
+                cwd=str(self.repo_root),
             )
 
             if not result.is_test or not result.class_name:
@@ -532,7 +551,7 @@ If this IS a valid UVM test class, extract:
                 name=result.class_name,
                 file_path=file_path,
                 base_class=result.base_class or "unknown",
-                description=result.description
+                description=result.description,
             )
 
         except Exception as e:
@@ -567,13 +586,13 @@ If this IS a valid UVM test class, extract:
 
                 # Simple regex extraction for sequences (handle parameterized bases)
                 match = re.search(r"class\s+(\w+)\s+extends\s+([a-zA-Z_][\w:#]*)", content)
-                if match and ("seq" in match.group(2).lower() or "uvm_sequence" in match.group(2).lower()):
+                if match and (
+                    "seq" in match.group(2).lower() or "uvm_sequence" in match.group(2).lower()
+                ):
                     base_class = match.group(2).split("#")[0]  # Strip parameterization
-                    sequences.append(UVMSequence(
-                        name=match.group(1),
-                        file_path=seq_file,
-                        base_class=base_class
-                    ))
+                    sequences.append(
+                        UVMSequence(name=match.group(1), file_path=seq_file, base_class=base_class)
+                    )
             except Exception:
                 continue
 
@@ -608,13 +627,12 @@ If this IS a valid UVM test class, extract:
                 try:
                     content = sv_file.read_text()
                     import re
+
                     matches = re.findall(r"covergroup\s+(\w+)", content)
                     for cg_name in matches:
                         # Try to find enclosing class
                         class_match = re.search(
-                            rf"class\s+(\w+).*?covergroup\s+{cg_name}",
-                            content,
-                            re.DOTALL
+                            rf"class\s+(\w+).*?covergroup\s+{cg_name}", content, re.DOTALL
                         )
                         if class_match:
                             full_name = f"{class_match.group(1)}.{cg_name}"
@@ -668,7 +686,9 @@ If this IS a valid UVM test class, extract:
         # Call async version
         return asyncio.run(self._detect_build_system_async(build_content, detected_sims))
 
-    async def _detect_build_system_async(self, build_content: str, detected_sims: set[str]) -> dict[str, Any]:
+    async def _detect_build_system_async(
+        self, build_content: str, detected_sims: set[str]
+    ) -> dict[str, Any]:
         """Detect build system and simulators using AI (async).
 
         Args:
@@ -699,7 +719,7 @@ Look for:
             "cmake": BuildSystem.CMAKE,
             "fusesoc": BuildSystem.FUSESOC,
             "dvsim": BuildSystem.DVSIM,
-            "custom": BuildSystem.CUSTOM
+            "custom": BuildSystem.CUSTOM,
         }
 
         sim_map = {
@@ -709,7 +729,7 @@ Look for:
             "irun": Simulator.XCELIUM,
             "vcs": Simulator.VCS,
             "verilator": Simulator.VERILATOR,
-            "dsim": Simulator.DSIM
+            "dsim": Simulator.DSIM,
         }
 
         try:
@@ -717,7 +737,7 @@ Look for:
                 prompt=prompt,
                 response_model=BuildInfo,
                 system_prompt="You are an expert in EDA build systems.",
-                cwd=str(self.repo_root)
+                cwd=str(self.repo_root),
             )
 
             build_system = build_sys_map.get(result.build_system, BuildSystem.CUSTOM)
@@ -727,13 +747,12 @@ Look for:
             regex_simulators = [sim_map[s] for s in detected_sims if s in sim_map]
             all_simulators = list(set(ai_simulators + regex_simulators))
 
-            return {
-                "build_system": build_system,
-                "simulators": all_simulators
-            }
+            return {"build_system": build_system, "simulators": all_simulators}
 
         except Exception as e:
-            logger.warning(f"[AI Analyzer] Warning: AI build detection failed, using regex fallback")
+            logger.warning(
+                f"[AI Analyzer] Warning: AI build detection failed, using regex fallback"
+            )
             # Fallback to regex-only detection
             regex_simulators = [sim_map[s] for s in detected_sims if s in sim_map]
             return {"build_system": BuildSystem.MAKEFILE, "simulators": regex_simulators}

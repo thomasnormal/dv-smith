@@ -77,10 +77,7 @@ class QuestaCovrageParser:
 
         # Find covergroup sections
         # Pattern: covergroup name followed by percentage
-        cg_pattern = re.compile(
-            r"^(\S+/\S+|\w+)\s+(\d+\.?\d*)%\s+(\d+\.?\d*)%",
-            re.MULTILINE
-        )
+        cg_pattern = re.compile(r"^(\S+/\S+|\w+)\s+(\d+\.?\d*)%\s+(\d+\.?\d*)%", re.MULTILINE)
 
         lines = content.split("\n")
         i = 0
@@ -103,10 +100,7 @@ class QuestaCovrageParser:
                     bin_line = lines[i].strip()
 
                     # Bin pattern: "bin name    hits    goal    status"
-                    bin_match = re.match(
-                        r"bin\s+(\w+)\s+(\d+)\s+(\d+)",
-                        bin_line
-                    )
+                    bin_match = re.match(r"bin\s+(\w+)\s+(\d+)\s+(\d+)", bin_line)
 
                     if bin_match:
                         bin_name = bin_match.group(1)
@@ -114,12 +108,11 @@ class QuestaCovrageParser:
                         goal = int(bin_match.group(3))
                         coverage_pct = (hits / goal * 100.0) if goal > 0 else 0.0
 
-                        bins.append(CoverageBin(
-                            name=bin_name,
-                            hits=hits,
-                            goal=goal,
-                            coverage_pct=coverage_pct
-                        ))
+                        bins.append(
+                            CoverageBin(
+                                name=bin_name, hits=hits, goal=goal, coverage_pct=coverage_pct
+                            )
+                        )
                         i += 1
                     elif bin_line.startswith("bin "):
                         # Alternative bin format
@@ -129,11 +122,7 @@ class QuestaCovrageParser:
                     else:
                         i += 1
 
-                groups.append(CoverageGroup(
-                    name=cg_name,
-                    bins=bins,
-                    overall_pct=overall_pct
-                ))
+                groups.append(CoverageGroup(name=cg_name, bins=bins, overall_pct=overall_pct))
                 continue
 
             i += 1

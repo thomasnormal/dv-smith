@@ -40,8 +40,9 @@ class TaskGenerator:
         self.backup_dir = Path("backups/original_tests")
         self.cwd = str(Path.cwd())
 
-    def generate_tasks(self, output_dir: Path,
-                      smoke_tests: Optional[list[str]] = None) -> list[TaskSpec]:
+    def generate_tasks(
+        self, output_dir: Path, smoke_tests: Optional[list[str]] = None
+    ) -> list[TaskSpec]:
         """Generate task specifications for all tests (backward compatible).
 
         Args:
@@ -53,8 +54,9 @@ class TaskGenerator:
         """
         return asyncio.run(self.generate_tasks_async(output_dir, smoke_tests))
 
-    async def generate_tasks_async(self, output_dir: Path,
-                                   smoke_tests: Optional[list[str]] = None) -> list[TaskSpec]:
+    async def generate_tasks_async(
+        self, output_dir: Path, smoke_tests: Optional[list[str]] = None
+    ) -> list[TaskSpec]:
         """Generate task specifications for all tests in parallel.
 
         Args:
@@ -87,18 +89,20 @@ class TaskGenerator:
         # Generate all tasks in parallel (with batching for rate limiting)
         BATCH_SIZE = 5  # Max concurrent AI calls
         all_tasks = []
-        
+
         total_batches = (len(tests_to_generate) + BATCH_SIZE - 1) // BATCH_SIZE
         with tqdm(total=len(tests_to_generate), desc="Generating tasks", unit="task") as pbar:
             for batch_start in range(0, len(tests_to_generate), BATCH_SIZE):
-                batch = tests_to_generate[batch_start:batch_start + BATCH_SIZE]
-                
+                batch = tests_to_generate[batch_start : batch_start + BATCH_SIZE]
+
                 # Generate tasks in parallel for this batch
-                batch_tasks = await asyncio.gather(*[
-                    self._create_task_for_test_async(test, batch_start + i + 1)
-                    for i, test in enumerate(batch)
-                ])
-                
+                batch_tasks = await asyncio.gather(
+                    *[
+                        self._create_task_for_test_async(test, batch_start + i + 1)
+                        for i, test in enumerate(batch)
+                    ]
+                )
+
                 all_tasks.extend(batch_tasks)
                 pbar.update(len(batch))
 
@@ -153,7 +157,9 @@ class TaskGenerator:
 
         # Create task spec
         # Sanitize task name for use in IDs and filenames
-        sanitized_id = metadata.task_name.lower().replace(' ', '_').replace('/', '_').replace('\\', '_')
+        sanitized_id = (
+            metadata.task_name.lower().replace(" ", "_").replace("/", "_").replace("\\", "_")
+        )
         task = TaskSpec(
             id=sanitized_id,
             name=metadata.task_name,
@@ -165,11 +171,10 @@ class TaskGenerator:
             hints=metadata.hints,
             original_test_files=[test.file_path],
             supported_simulators=supported_sims,
-            notes=self._generate_notes(test)
+            notes=self._generate_notes(test),
         )
 
         return task
-
 
     def _generate_complete_metadata(self, test: UVMTest) -> CompleteTaskMetadata:
         """Generate all task metadata in a single AI call.
@@ -200,8 +205,9 @@ class TaskGenerator:
         # Get available covergroups (already strings in analysis.covergroups)
         available_cgs = self.analysis.covergroups if self.analysis.covergroups else []
         if not available_cgs:
-            available_cgs = self.config.get("coverage", {}).get("questa", {}).get(
-                "functional_covergroups", [])
+            available_cgs = (
+                self.config.get("coverage", {}).get("questa", {}).get("functional_covergroups", [])
+            )
 
         covergroups_info = f"""
 Available covergroups in the testbench:
@@ -266,14 +272,16 @@ Analyze the test thoroughly and provide comprehensive, high-quality metadata.
                 prompt=prompt,
                 response_model=CompleteTaskMetadata,
                 system_prompt="You are an expert verification engineer creating high-quality task specifications. Be thorough, specific, and professional.",
-                cwd=str(self.cwd)
+                cwd=str(self.cwd),
             )
             return result
 
         except Exception as e:
             raise RuntimeError(f"AI task metadata generation failed: {e}") from e
 
-    def _create_acceptance_criteria_with_covergroups(self, test: UVMTest, covergroups: list[str]) -> AcceptanceCriteria:
+    def _create_acceptance_criteria_with_covergroups(
+        self, test: UVMTest, covergroups: list[str]
+    ) -> AcceptanceCriteria:
         """Create acceptance criteria for a test with pre-selected covergroups.
 
         Args:
@@ -290,9 +298,10 @@ Analyze the test thoroughly and provide comprehensive, high-quality metadata.
         # Validate covergroups exist (already strings in analysis.covergroups)
         available_cgs = self.analysis.covergroups if self.analysis.covergroups else []
         if not available_cgs:
-            available_cgs = self.config.get("coverage", {}).get("questa", {}).get(
-                "functional_covergroups", [])
-        
+            available_cgs = (
+                self.config.get("coverage", {}).get("questa", {}).get("functional_covergroups", [])
+            )
+
         # Filter to only valid covergroups
         target_bins = [cg for cg in covergroups if cg in available_cgs]
         if not target_bins and available_cgs:
@@ -312,8 +321,8 @@ Analyze the test thoroughly and provide comprehensive, high-quality metadata.
             weights={
                 "functional_coverage": weights.get("functional_coverage", 0.6),
                 "code_coverage": weights.get("code_coverage", 0.3),
-                "health": weights.get("health", 0.1)
-            }
+                "health": weights.get("health", 0.1),
+            },
         )
 
         return criteria
@@ -346,8 +355,8 @@ Analyze the test thoroughly and provide comprehensive, high-quality metadata.
             weights={
                 "functional_coverage": weights.get("functional_coverage", 0.6),
                 "code_coverage": weights.get("code_coverage", 0.3),
-                "health": weights.get("health", 0.1)
-            }
+                "health": weights.get("health", 0.1),
+            },
         )
 
         return criteria

@@ -13,6 +13,7 @@ from ...core.models import CoverageReport, Simulator
 @dataclass
 class SimulatorConfig:
     """Configuration for a simulator run."""
+
     work_dir: Path
     test_name: str
     seed: Optional[int] = None
@@ -25,6 +26,7 @@ class SimulatorConfig:
 @dataclass
 class SimulationResult:
     """Result of a simulation run."""
+
     success: bool
     exit_code: int
     log_path: Path
@@ -123,8 +125,9 @@ class SimulatorAdapter(ABC):
         """
         pass
 
-    def run_regression(self, tests: list[str], work_dir: Path,
-                      seeds: Optional[list[int]] = None) -> list[SimulationResult]:
+    def run_regression(
+        self, tests: list[str], work_dir: Path, seeds: Optional[list[int]] = None
+    ) -> list[SimulationResult]:
         """Run multiple tests (regression).
 
         Default implementation runs tests sequentially. Subclasses can override
@@ -139,13 +142,11 @@ class SimulatorAdapter(ABC):
             List of SimulationResults
         """
         results = []
-        for i, test in tqdm(enumerate(tests), total=len(tests), desc="Running regression", unit="test"):
+        for i, test in tqdm(
+            enumerate(tests), total=len(tests), desc="Running regression", unit="test"
+        ):
             seed = seeds[i] if seeds and i < len(seeds) else None
-            config = SimulatorConfig(
-                work_dir=work_dir,
-                test_name=test,
-                seed=seed
-            )
+            config = SimulatorConfig(work_dir=work_dir, test_name=test, seed=seed)
             result = self.run_test(config)
             results.append(result)
         return results
@@ -177,8 +178,9 @@ class SimulatorRegistry:
         cls._adapters[simulator] = adapter_class
 
     @classmethod
-    def get_adapter(cls, simulator: Simulator, repo_root: Path,
-                   profile_config: dict[str, Any]) -> SimulatorAdapter:
+    def get_adapter(
+        cls, simulator: Simulator, repo_root: Path, profile_config: dict[str, Any]
+    ) -> SimulatorAdapter:
         """Get an adapter instance for a simulator.
 
         Args:

@@ -49,12 +49,7 @@ class QuestaAdapter(SimulatorAdapter):
 
         # Try to get version
         try:
-            result = subprocess.run(
-                ["vsim", "-version"],
-                capture_output=True,
-                text=True,
-                timeout=5
-            )
+            result = subprocess.run(["vsim", "-version"], capture_output=True, text=True, timeout=5)
             return result.returncode == 0
         except Exception:
             return False
@@ -89,7 +84,7 @@ class QuestaAdapter(SimulatorAdapter):
                 cwd=self.repo_root,
                 capture_output=True,
                 text=True,
-                timeout=600  # 10 minute compile timeout
+                timeout=600,  # 10 minute compile timeout
             )
 
             compile_log = work_dir / "compile.log"
@@ -128,7 +123,7 @@ class QuestaAdapter(SimulatorAdapter):
         replacements = {
             "test": sim_config.test_name,
             "seed": str(sim_config.seed) if sim_config.seed else "random",
-            "verbosity": sim_config.uvm_verbosity
+            "verbosity": sim_config.uvm_verbosity,
         }
 
         for key, value in replacements.items():
@@ -139,11 +134,13 @@ class QuestaAdapter(SimulatorAdapter):
             coverage_db = sim_config.work_dir / "coverage.ucdb"
             # Add coverage save command to dofile
             do_file = sim_config.work_dir / "run.do"
-            do_file.write_text(f"""
+            do_file.write_text(
+                f"""
 coverage save -onexit {coverage_db}
 run -all
 quit
-""")
+"""
+            )
             run_cmd += f" -do {do_file}"
 
         log_file = sim_config.work_dir / f"{sim_config.test_name}.log"
@@ -152,6 +149,7 @@ quit
         logger.debug(f"Command: {run_cmd}")
 
         import time
+
         start_time = time.time()
 
         try:
@@ -161,7 +159,7 @@ quit
                 cwd=self.repo_root,
                 capture_output=True,
                 text=True,
-                timeout=sim_config.timeout_sec
+                timeout=sim_config.timeout_sec,
             )
 
             runtime = time.time() - start_time
@@ -170,7 +168,9 @@ quit
             log_file.write_text(result.stdout + result.stderr)
 
             success = result.returncode == 0
-            coverage_db = sim_config.work_dir / "coverage.ucdb" if sim_config.coverage_enabled else None
+            coverage_db = (
+                sim_config.work_dir / "coverage.ucdb" if sim_config.coverage_enabled else None
+            )
 
             return SimulationResult(
                 success=success,
@@ -180,7 +180,7 @@ quit
                 stdout=result.stdout,
                 stderr=result.stderr,
                 runtime_sec=runtime,
-                timed_out=False
+                timed_out=False,
             )
 
         except subprocess.TimeoutExpired:
@@ -193,7 +193,7 @@ quit
                 log_path=log_file,
                 coverage_db_path=None,
                 runtime_sec=runtime,
-                timed_out=True
+                timed_out=True,
             )
 
         except Exception as e:
@@ -206,7 +206,7 @@ quit
                 log_path=log_file,
                 coverage_db_path=None,
                 runtime_sec=runtime,
-                timed_out=False
+                timed_out=False,
             )
 
     def extract_coverage(self, sim_result: SimulationResult) -> CoverageReport:
@@ -224,15 +224,13 @@ quit
 
         # Generate text report from UCDB
         report_file = sim_result.coverage_db_path.parent / "coverage_report.txt"
-        report_cmd = f"vcover report -details -thresh 0 -output {report_file} {sim_result.coverage_db_path}"
+        report_cmd = (
+            f"vcover report -details -thresh 0 -output {report_file} {sim_result.coverage_db_path}"
+        )
 
         try:
             result = subprocess.run(
-                report_cmd,
-                shell=True,
-                capture_output=True,
-                text=True,
-                timeout=60
+                report_cmd, shell=True, capture_output=True, text=True, timeout=60
             )
 
             if result.returncode != 0:
@@ -263,11 +261,7 @@ quit
 
         try:
             result = subprocess.run(
-                merge_cmd,
-                shell=True,
-                capture_output=True,
-                text=True,
-                timeout=300
+                merge_cmd, shell=True, capture_output=True, text=True, timeout=300
             )
 
             if result.returncode != 0:

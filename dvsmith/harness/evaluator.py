@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from ..config import get_logger
+
 # Import adapters to trigger registration
 from ..adapters.sim.base import SimulatorConfig, SimulatorRegistry
 from ..core.models import (
@@ -21,8 +22,9 @@ logger = get_logger(__name__)
 class Evaluator:
     """Evaluate agent solutions against task specifications."""
 
-    def __init__(self, gym_dir: Path, profile: dict[str, Any],
-                 simulator: Optional[Simulator] = None) -> None:
+    def __init__(
+        self, gym_dir: Path, profile: dict[str, Any], simulator: Optional[Simulator] = None
+    ) -> None:
         """Initialize evaluator.
 
         Args:
@@ -36,14 +38,11 @@ class Evaluator:
 
         # Get simulator adapter
         sim_config = self.profile["build"].get(self.simulator.value, {})
-        self.adapter = SimulatorRegistry.get_adapter(
-            self.simulator,
-            self.gym_dir,
-            sim_config
-        )
+        self.adapter = SimulatorRegistry.get_adapter(self.simulator, self.gym_dir, sim_config)
 
-    def evaluate(self, task: TaskSpec, patch_path: Path,
-                work_dir: Optional[Path] = None) -> EvaluationResult:
+    def evaluate(
+        self, task: TaskSpec, patch_path: Path, work_dir: Optional[Path] = None
+    ) -> EvaluationResult:
         """Evaluate a solution against a task.
 
         Args:
@@ -75,7 +74,7 @@ class Evaluator:
             work_dir=work_dir,
             test_name=test_name,
             seed=task.acceptance.weights.get("seed", None),  # Can add seed to acceptance
-            coverage_enabled=True
+            coverage_enabled=True,
         )
 
         sim_result = self.adapter.run_test(config)
@@ -112,7 +111,7 @@ class Evaluator:
                 ["git", "apply", "--check", str(abs_patch_path)],
                 cwd=self.gym_dir,
                 capture_output=True,
-                text=True
+                text=True,
             )
 
             if result.returncode != 0:
@@ -124,7 +123,7 @@ class Evaluator:
                 ["git", "apply", str(abs_patch_path)],
                 cwd=self.gym_dir,
                 capture_output=True,
-                text=True
+                text=True,
             )
 
             return result.returncode == 0
@@ -152,8 +151,13 @@ class Evaluator:
         # Fallback: use task ID + _test
         return f"{task.id}_test"
 
-    def _score(self, task: TaskSpec, coverage: CoverageReport,
-              log_path: Optional[Path], coverage_db_path: Optional[Path]) -> EvaluationResult:
+    def _score(
+        self,
+        task: TaskSpec,
+        coverage: CoverageReport,
+        log_path: Optional[Path],
+        coverage_db_path: Optional[Path],
+    ) -> EvaluationResult:
         """Compute score for a solution.
 
         Args:
@@ -174,9 +178,9 @@ class Evaluator:
 
         # Weighted total
         total_score = (
-            functional_score * acceptance.weights["functional_coverage"] +
-            code_score * acceptance.weights["code_coverage"] +
-            health_score * acceptance.weights["health"]
+            functional_score * acceptance.weights["functional_coverage"]
+            + code_score * acceptance.weights["code_coverage"]
+            + health_score * acceptance.weights["health"]
         )
 
         # Check if passed (all thresholds met)
@@ -204,11 +208,10 @@ class Evaluator:
             functional_bins_missed=bins_missed,
             thresholds_met=thresholds_met,
             log_path=log_path,
-            coverage_db_path=coverage_db_path
+            coverage_db_path=coverage_db_path,
         )
 
-    def _score_functional(self, coverage: CoverageReport,
-                         acceptance: AcceptanceCriteria) -> float:
+    def _score_functional(self, coverage: CoverageReport, acceptance: AcceptanceCriteria) -> float:
         """Score functional coverage (0.0 to 1.0).
 
         Args:
@@ -246,8 +249,9 @@ class Evaluator:
 
             return total_score / len(target_bins) if target_bins else 0.0
 
-    def _score_code_coverage(self, coverage: CoverageReport,
-                            acceptance: AcceptanceCriteria) -> float:
+    def _score_code_coverage(
+        self, coverage: CoverageReport, acceptance: AcceptanceCriteria
+    ) -> float:
         """Score code coverage (0.0 to 1.0).
 
         Args:
@@ -260,20 +264,28 @@ class Evaluator:
         code_cov = coverage.code_coverage
 
         # Score each metric
-        stmt_score = min(1.0, code_cov.statements_pct / acceptance.code_statements_min_pct) \
-            if acceptance.code_statements_min_pct > 0 else 0.0
+        stmt_score = (
+            min(1.0, code_cov.statements_pct / acceptance.code_statements_min_pct)
+            if acceptance.code_statements_min_pct > 0
+            else 0.0
+        )
 
-        branch_score = min(1.0, code_cov.branches_pct / acceptance.code_branches_min_pct) \
-            if acceptance.code_branches_min_pct > 0 else 0.0
+        branch_score = (
+            min(1.0, code_cov.branches_pct / acceptance.code_branches_min_pct)
+            if acceptance.code_branches_min_pct > 0
+            else 0.0
+        )
 
-        toggle_score = min(1.0, code_cov.toggles_pct / acceptance.code_toggles_min_pct) \
-            if acceptance.code_toggles_min_pct > 0 else 0.0
+        toggle_score = (
+            min(1.0, code_cov.toggles_pct / acceptance.code_toggles_min_pct)
+            if acceptance.code_toggles_min_pct > 0
+            else 0.0
+        )
 
         # Average (could be weighted)
         return (stmt_score + branch_score + toggle_score) / 3.0
 
-    def _score_health(self, coverage: CoverageReport,
-                     acceptance: AcceptanceCriteria) -> float:
+    def _score_health(self, coverage: CoverageReport, acceptance: AcceptanceCriteria) -> float:
         """Score health (0.0 or 1.0).
 
         Args:
@@ -299,8 +311,7 @@ class Evaluator:
 
         return 1.0
 
-    def _check_passed(self, coverage: CoverageReport,
-                     acceptance: AcceptanceCriteria) -> bool:
+    def _check_passed(self, coverage: CoverageReport, acceptance: AcceptanceCriteria) -> bool:
         """Check if solution passes all criteria.
 
         Args:
@@ -317,8 +328,7 @@ class Evaluator:
 
         return functional_ok and code_ok and health_ok
 
-    def _check_bins(self, coverage: CoverageReport,
-                   acceptance: AcceptanceCriteria) -> tuple:
+    def _check_bins(self, coverage: CoverageReport, acceptance: AcceptanceCriteria) -> tuple:
         """Check which bins met/missed targets.
 
         Returns:
@@ -362,8 +372,9 @@ class Evaluator:
 
         return 0.0
 
-    def _failure_result(self, task: TaskSpec, reason: str,
-                       log_path: Optional[Path] = None) -> EvaluationResult:
+    def _failure_result(
+        self, task: TaskSpec, reason: str, log_path: Optional[Path] = None
+    ) -> EvaluationResult:
         """Create a failure result.
 
         Args:
@@ -384,7 +395,7 @@ class Evaluator:
             functional_score=0.0,
             code_coverage_score=0.0,
             health_score=0.0,
-            log_path=log_path
+            log_path=log_path,
         )
 
     def _persist_artifacts(self, work_dir: Path, result: EvaluationResult) -> None:

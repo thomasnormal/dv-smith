@@ -5,6 +5,7 @@ from typing import Any, Optional
 import tqdm
 
 from ..config import get_logger
+
 # Import adapters to trigger registration
 from ..adapters.sim.base import SimulatorAdapter, SimulatorConfig, SimulatorRegistry
 from ..core.models import Simulator
@@ -22,8 +23,9 @@ class Validator:
     4. Profile is valid
     """
 
-    def __init__(self, gym_dir: Path, profile: dict[str, Any],
-                 simulator: Optional[Simulator] = None) -> None:
+    def __init__(
+        self, gym_dir: Path, profile: dict[str, Any], simulator: Optional[Simulator] = None
+    ) -> None:
         """Initialize validator.
 
         Args:
@@ -96,12 +98,7 @@ class Validator:
 
     def _check_directory_structure(self) -> bool:
         """Verify required directories exist."""
-        required_dirs = [
-            "tests",
-            "sequences",
-            "tasks",
-            "backups/original_tests"
-        ]
+        required_dirs = ["tests", "sequences", "tasks", "backups/original_tests"]
 
         for dir_name in required_dirs:
             dir_path = self.gym_dir / dir_name
@@ -136,11 +133,7 @@ class Validator:
 
         try:
             sim_config = self.profile["build"].get(self.simulator.value, {})
-            self.adapter = SimulatorRegistry.get_adapter(
-                self.simulator,
-                self.gym_dir,
-                sim_config
-            )
+            self.adapter = SimulatorRegistry.get_adapter(self.simulator, self.gym_dir, sim_config)
             return True
         except Exception as e:
             logger.error(f"    Simulator setup error: {e}")
@@ -176,7 +169,7 @@ class Validator:
                 work_dir=work_dir,
                 test_name=test_name,
                 seed=12345,  # Fixed seed for validation
-                timeout_sec=120
+                timeout_sec=120,
             )
 
             result = self.adapter.run_test(config)
@@ -205,7 +198,7 @@ class Validator:
             return False
 
         # Sample up to 3 tasks for validation
-        sample_tasks = task_files[:min(3, len(task_files))]
+        sample_tasks = task_files[: min(3, len(task_files))]
 
         logger.info(f"    Checking {len(sample_tasks)} sample tasks...")
 

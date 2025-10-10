@@ -96,7 +96,7 @@ class XceliumCoverageParser:
                 # Extract name (first non-tree element)
                 name = None
                 for part in parts:
-                    if part and not part.startswith(('|', '-')):
+                    if part and not part.startswith(("|", "-")):
                         name = part
                         break
 
@@ -106,7 +106,7 @@ class XceliumCoverageParser:
                 # Find functional coverage columns (last occurrence of percentage and bin count)
                 # Format: "21.18%               4.83% (7/145)"
                 # We want the percentage and bin count from "Functional Covered" column
-                match = re.search(r'(\d+\.?\d*)%\s+\((\d+)/(\d+)\)\s*$', line)
+                match = re.search(r"(\d+\.?\d*)%\s+\((\d+)/(\d+)\)\s*$", line)
                 if match:
                     pct = float(match.group(1))
                     bins_met = int(match.group(2))
@@ -115,19 +115,27 @@ class XceliumCoverageParser:
                     # Create bins based on met/total
                     bins = []
                     for i in range(bins_met):
-                        bins.append(CoverageBin(name=f"bin_{i}", hits=1, goal=1, coverage_pct=100.0))
+                        bins.append(
+                            CoverageBin(name=f"bin_{i}", hits=1, goal=1, coverage_pct=100.0)
+                        )
                     for i in range(bins_total - bins_met):
-                        bins.append(CoverageBin(name=f"bin_{bins_met + i}", hits=0, goal=1, coverage_pct=0.0))
+                        bins.append(
+                            CoverageBin(
+                                name=f"bin_{bins_met + i}", hits=0, goal=1, coverage_pct=0.0
+                            )
+                        )
 
                     # Create coverage group (use last part of hierarchical name)
                     instance_name = name
                     group_name = name.replace("_h", "").replace("_cov", "")  # Clean up name
 
-                    groups.append(CoverageGroup(
-                        name=f"{instance_name}.{group_name}_covergroup",
-                        overall_pct=pct,
-                        bins=bins
-                    ))
+                    groups.append(
+                        CoverageGroup(
+                            name=f"{instance_name}.{group_name}_covergroup",
+                            overall_pct=pct,
+                            bins=bins,
+                        )
+                    )
 
             i = 0
 
@@ -185,22 +193,18 @@ class XceliumCoverageParser:
                     # Parse bin entries
                     elif line.startswith("Bin:"):
                         # Format: Bin: bin_name    Hits: 10    Goal: 1    Status: Covered
-                        bin_match = re.match(
-                            r"Bin:\s+(\S+)\s+Hits:\s+(\d+)\s+Goal:\s+(\d+)",
-                            line
-                        )
+                        bin_match = re.match(r"Bin:\s+(\S+)\s+Hits:\s+(\d+)\s+Goal:\s+(\d+)", line)
                         if bin_match:
                             bin_name = bin_match.group(1)
                             hits = int(bin_match.group(2))
                             goal = int(bin_match.group(3))
                             coverage_pct = (hits / goal * 100.0) if goal > 0 else 0.0
 
-                            bins.append(CoverageBin(
-                                name=bin_name,
-                                hits=hits,
-                                goal=goal,
-                                coverage_pct=coverage_pct
-                            ))
+                            bins.append(
+                                CoverageBin(
+                                    name=bin_name, hits=hits, goal=goal, coverage_pct=coverage_pct
+                                )
+                            )
 
                     i += 1
 
@@ -208,11 +212,7 @@ class XceliumCoverageParser:
                 if overall_pct > 0 or bins:
                     # Format name as instance.covergroup if instance is available
                     full_name = f"{instance_name}.{cg_name}" if instance_name else cg_name
-                    groups.append(CoverageGroup(
-                        name=full_name,
-                        bins=bins,
-                        overall_pct=overall_pct
-                    ))
+                    groups.append(CoverageGroup(name=full_name, bins=bins, overall_pct=overall_pct))
                 continue
 
             i += 1
@@ -251,11 +251,11 @@ class XceliumCoverageParser:
 
         # Get column positions from header
         col_positions = {
-            'Block': header_line.find('Block'),
-            'Expression': header_line.find('Expression'),
-            'Toggle': header_line.find('Toggle'),
-            'Statement': header_line.find('Statement'),
-            'Fsm': header_line.find('Fsm Average'),
+            "Block": header_line.find("Block"),
+            "Expression": header_line.find("Expression"),
+            "Toggle": header_line.find("Toggle"),
+            "Statement": header_line.find("Statement"),
+            "Fsm": header_line.find("Fsm Average"),
         }
 
         # Filter valid columns
@@ -276,20 +276,20 @@ class XceliumCoverageParser:
                 continue
 
             # Extract percentages with their positions
-            for match in re.finditer(r'(\d+\.?\d*)%', line):
+            for match in re.finditer(r"(\d+\.?\d*)%", line):
                 val = float(match.group(1))
                 pos = match.start()
 
                 # Determine which column based on position
-                if 'Block' in cols and abs(pos - cols['Block']) < 20:
+                if "Block" in cols and abs(pos - cols["Block"]) < 20:
                     block_vals.append(val)
-                elif 'Expression' in cols and abs(pos - cols['Expression']) < 20:
+                elif "Expression" in cols and abs(pos - cols["Expression"]) < 20:
                     expr_vals.append(val)
-                elif 'Toggle' in cols and abs(pos - cols['Toggle']) < 20:
+                elif "Toggle" in cols and abs(pos - cols["Toggle"]) < 20:
                     toggle_vals.append(val)
-                elif 'Statement' in cols and abs(pos - cols['Statement']) < 20:
+                elif "Statement" in cols and abs(pos - cols["Statement"]) < 20:
                     stmt_vals.append(val)
-                elif 'Fsm' in cols and abs(pos - cols['Fsm']) < 20:
+                elif "Fsm" in cols and abs(pos - cols["Fsm"]) < 20:
                     fsm_vals.append(val)
 
         # Use average of hardware coverage (exclude UVM/testbench)

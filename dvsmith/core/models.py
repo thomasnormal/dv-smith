@@ -10,6 +10,7 @@ from typing import Optional
 
 class Simulator(str, Enum):
     """Supported simulators."""
+
     QUESTA = "questa"
     XCELIUM = "xcelium"
     VCS = "vcs"
@@ -19,6 +20,7 @@ class Simulator(str, Enum):
 
 class BuildSystem(str, Enum):
     """Detected build system types."""
+
     MAKEFILE = "makefile"
     CMAKE = "cmake"
     DVSIM = "dvsim"
@@ -28,14 +30,16 @@ class BuildSystem(str, Enum):
 
 class TaskCategory(str, Enum):
     """High-level task categories."""
+
     # Current supported categories
-    STIMULUS = "stimulus"              # Create/modify UVM tests and sequences
-    COVERAGE_FUNC = "coverage_func"    # Increase functional coverage / hit bins
+    STIMULUS = "stimulus"  # Create/modify UVM tests and sequences
+    COVERAGE_FUNC = "coverage_func"  # Increase functional coverage / hit bins
     # Future categories could include: COVERAGE_CODE, ASSERTION, CHECKER, ENV, BUILD, LINT, MUTATION
 
 
 class TaskLevel(str, Enum):
     """Task difficulty levels."""
+
     EASY = "easy"
     MEDIUM = "medium"
     HARD = "hard"
@@ -44,6 +48,7 @@ class TaskLevel(str, Enum):
 @dataclass
 class CoverageBin:
     """Individual coverage bin information."""
+
     name: str
     hits: int
     goal: int
@@ -57,6 +62,7 @@ class CoverageBin:
 @dataclass
 class CoverageGroup:
     """Functional coverage group with bins."""
+
     name: str
     bins: list[CoverageBin]
     overall_pct: float
@@ -69,6 +75,7 @@ class CoverageGroup:
 @dataclass
 class CodeCoverage:
     """Code coverage metrics."""
+
     statements_pct: float = 0.0
     branches_pct: float = 0.0
     toggles_pct: float = 0.0
@@ -79,6 +86,7 @@ class CodeCoverage:
 @dataclass
 class HealthMetrics:
     """Simulation health/quality metrics."""
+
     uvm_errors: int = 0
     uvm_fatals: int = 0
     uvm_warnings: int = 0
@@ -90,17 +98,20 @@ class HealthMetrics:
     @property
     def is_healthy(self) -> bool:
         """Check if simulation is in healthy state."""
-        return (self.uvm_errors == 0 and
-                self.uvm_fatals == 0 and
-                self.scoreboard_errors == 0 and
-                self.assertion_failures == 0 and
-                not self.simulation_timeout and
-                self.compilation_errors == 0)
+        return (
+            self.uvm_errors == 0
+            and self.uvm_fatals == 0
+            and self.scoreboard_errors == 0
+            and self.assertion_failures == 0
+            and not self.simulation_timeout
+            and self.compilation_errors == 0
+        )
 
 
 @dataclass
 class CoverageReport:
     """Normalized coverage report across all simulators."""
+
     functional_groups: list[CoverageGroup] = field(default_factory=list)
     code_coverage: CodeCoverage = field(default_factory=CodeCoverage)
     health: HealthMetrics = field(default_factory=HealthMetrics)
@@ -123,10 +134,12 @@ class CoverageReport:
                             "name": b.name,
                             "hits": b.hits,
                             "goal": b.goal,
-                            "coverage_pct": b.coverage_pct
-                        } for b in g.bins
-                    ]
-                } for g in self.functional_groups
+                            "coverage_pct": b.coverage_pct,
+                        }
+                        for b in g.bins
+                    ],
+                }
+                for g in self.functional_groups
             ],
             "code_coverage": {
                 "statements_pct": self.code_coverage.statements_pct,
@@ -143,9 +156,9 @@ class CoverageReport:
                 "assertion_failures": self.health.assertion_failures,
                 "simulation_timeout": self.health.simulation_timeout,
                 "compilation_errors": self.health.compilation_errors,
-                "is_healthy": self.health.is_healthy
+                "is_healthy": self.health.is_healthy,
             },
-            "simulator": self.simulator.value if self.simulator else None
+            "simulator": self.simulator.value if self.simulator else None,
         }
         return json.dumps(data, indent=2)
 
@@ -153,6 +166,7 @@ class CoverageReport:
 @dataclass
 class UVMTest:
     """Discovered UVM test information."""
+
     name: str
     file_path: Path
     base_class: str
@@ -164,6 +178,7 @@ class UVMTest:
 @dataclass
 class UVMSequence:
     """Discovered UVM sequence information."""
+
     name: str
     file_path: Path
     base_class: str
@@ -174,6 +189,7 @@ class UVMSequence:
 @dataclass
 class RepoAnalysis:
     """Results of repository analysis."""
+
     tests: list[UVMTest] = field(default_factory=list)
     sequences: list[UVMSequence] = field(default_factory=list)
     covergroups: list[str] = field(default_factory=list)
@@ -201,7 +217,7 @@ class RepoAnalysis:
                     "base_class": t.base_class,
                     "sequences_used": t.sequences_used,
                     "description": t.description,
-                    "line_number": t.line_number
+                    "line_number": t.line_number,
                 }
                 for t in self.tests
             ],
@@ -211,7 +227,7 @@ class RepoAnalysis:
                     "file_path": str(s.file_path),
                     "base_class": s.base_class,
                     "description": s.description,
-                    "line_number": s.line_number
+                    "line_number": s.line_number,
                 }
                 for s in self.sequences
             ],
@@ -229,8 +245,12 @@ class RepoAnalysis:
     def from_dict(data: dict, repo_root: Optional[Path] = None) -> "RepoAnalysis":
         """Deserialize from dictionary."""
         # Use provided repo_root or from data
-        root = Path(repo_root) if repo_root else (Path(data["repo_root"]) if data.get("repo_root") else None)
-        
+        root = (
+            Path(repo_root)
+            if repo_root
+            else (Path(data["repo_root"]) if data.get("repo_root") else None)
+        )
+
         return RepoAnalysis(
             tests=[
                 UVMTest(
@@ -239,7 +259,7 @@ class RepoAnalysis:
                     base_class=t["base_class"],
                     sequences_used=t.get("sequences_used", []),
                     description=t.get("description"),
-                    line_number=t.get("line_number")
+                    line_number=t.get("line_number"),
                 )
                 for t in data.get("tests", [])
             ],
@@ -249,7 +269,7 @@ class RepoAnalysis:
                     file_path=Path(s["file_path"]),
                     base_class=s["base_class"],
                     description=s.get("description"),
-                    line_number=s.get("line_number")
+                    line_number=s.get("line_number"),
                 )
                 for s in data.get("sequences", [])
             ],
@@ -267,6 +287,7 @@ class RepoAnalysis:
 @dataclass
 class AcceptanceCriteria:
     """Task acceptance criteria."""
+
     functional_bins: list[str] = field(default_factory=list)
     functional_min_pct: float = 80.0
     functional_strategy: str = "any_of"  # or "all_of"
@@ -280,16 +301,15 @@ class AcceptanceCriteria:
     max_uvm_fatals: int = 0
     all_assertions_pass: bool = True
 
-    weights: dict[str, float] = field(default_factory=lambda: {
-        "functional_coverage": 0.6,
-        "code_coverage": 0.3,
-        "health": 0.1
-    })
+    weights: dict[str, float] = field(
+        default_factory=lambda: {"functional_coverage": 0.6, "code_coverage": 0.3, "health": 0.1}
+    )
 
 
 @dataclass
 class TaskSpec:
     """Task specification."""
+
     id: str
     name: str
     level: TaskLevel
@@ -326,63 +346,58 @@ class TaskSpec:
             "- How to add tests to the package file (required for compilation)",
             "- UVM test structure and base classes",
             "- Common errors and how to fix them",
-            ""
+            "",
         ]
 
         if self.hints:
-            lines.extend([
-                "## Hints",
-                ""
-            ])
+            lines.extend(["## Hints", ""])
             for hint in self.hints:
                 lines.append(f"- {hint}")
             lines.append("")
 
-        lines.extend([
-            "## Acceptance Criteria",
-            "",
-            "### Functional Coverage",
-            f"- **Strategy:** {self.acceptance.functional_strategy}",
-            f"- **Minimum:** {self.acceptance.functional_min_pct}%",
-            "- **Target bins/groups:**"
-        ])
+        lines.extend(
+            [
+                "## Acceptance Criteria",
+                "",
+                "### Functional Coverage",
+                f"- **Strategy:** {self.acceptance.functional_strategy}",
+                f"- **Minimum:** {self.acceptance.functional_min_pct}%",
+                "- **Target bins/groups:**",
+            ]
+        )
 
         for bin_name in self.acceptance.functional_bins:
             lines.append(f"  - `{bin_name}`")
 
-        lines.extend([
-            "",
-            "### Code Coverage",
-            f"- Statements: ≥{self.acceptance.code_statements_min_pct}%",
-            f"- Branches: ≥{self.acceptance.code_branches_min_pct}%",
-            f"- Toggles: ≥{self.acceptance.code_toggles_min_pct}%",
-            "",
-            "### Health",
-            f"- UVM Errors: ≤{self.acceptance.max_uvm_errors}",
-            f"- UVM Fatals: ≤{self.acceptance.max_uvm_fatals}",
-            f"- Scoreboard Errors: ≤{self.acceptance.max_scoreboard_errors}",
-            f"- Assertions: {'All must pass' if self.acceptance.all_assertions_pass else 'Allow failures'}",
-            "",
-            "### Scoring Weights",
-            f"- Functional Coverage: {self.acceptance.weights['functional_coverage']:.1%}",
-            f"- Code Coverage: {self.acceptance.weights['code_coverage']:.1%}",
-            f"- Health: {self.acceptance.weights['health']:.1%}",
-            ""
-        ])
+        lines.extend(
+            [
+                "",
+                "### Code Coverage",
+                f"- Statements: ≥{self.acceptance.code_statements_min_pct}%",
+                f"- Branches: ≥{self.acceptance.code_branches_min_pct}%",
+                f"- Toggles: ≥{self.acceptance.code_toggles_min_pct}%",
+                "",
+                "### Health",
+                f"- UVM Errors: ≤{self.acceptance.max_uvm_errors}",
+                f"- UVM Fatals: ≤{self.acceptance.max_uvm_fatals}",
+                f"- Scoreboard Errors: ≤{self.acceptance.max_scoreboard_errors}",
+                f"- Assertions: {'All must pass' if self.acceptance.all_assertions_pass else 'Allow failures'}",
+                "",
+                "### Scoring Weights",
+                f"- Functional Coverage: {self.acceptance.weights['functional_coverage']:.1%}",
+                f"- Code Coverage: {self.acceptance.weights['code_coverage']:.1%}",
+                f"- Health: {self.acceptance.weights['health']:.1%}",
+                "",
+            ]
+        )
 
         if self.notes:
-            lines.extend([
-                "## Notes",
-                self.notes,
-                ""
-            ])
+            lines.extend(["## Notes", self.notes, ""])
 
         if self.original_test_files:
-            lines.extend([
-                "## Reference",
-                "Original test files (for auditing only, not compiled):",
-                ""
-            ])
+            lines.extend(
+                ["## Reference", "Original test files (for auditing only, not compiled):", ""]
+            )
             for file_path in self.original_test_files:
                 lines.append(f"- `{file_path}`")
             lines.append("")
@@ -487,7 +502,7 @@ class TaskSpec:
             hints=hints,
             original_test_files=original_files,
             supported_simulators=simulators,
-            notes=notes
+            notes=notes,
         )
 
     @staticmethod
@@ -600,11 +615,7 @@ class TaskSpec:
             all_assertions_pass = False
 
         # Extract scoring weights
-        weights = {
-            "functional_coverage": 0.6,
-            "code_coverage": 0.3,
-            "health": 0.1
-        }
+        weights = {"functional_coverage": 0.6, "code_coverage": 0.3, "health": 0.1}
 
         func_weight_match = re.search(r"Functional Coverage:\s*(\d+(?:\.\d+)?)%", content)
         if func_weight_match:
@@ -629,13 +640,14 @@ class TaskSpec:
             max_uvm_errors=max_uvm_errors,
             max_uvm_fatals=max_uvm_fatals,
             all_assertions_pass=all_assertions_pass,
-            weights=weights
+            weights=weights,
         )
 
 
 @dataclass
 class EvaluationResult:
     """Result of task evaluation."""
+
     task_id: str
     passed: bool
     score: float
@@ -665,6 +677,6 @@ class EvaluationResult:
             "functional_bins_met": self.functional_bins_met,
             "functional_bins_missed": self.functional_bins_missed,
             "thresholds_met": self.thresholds_met,
-            "coverage_report": json.loads(self.coverage_report.to_json())
+            "coverage_report": json.loads(self.coverage_report.to_json()),
         }
         return json.dumps(data, indent=2)

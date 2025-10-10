@@ -83,7 +83,8 @@ class TestXceliumCoverageParser:
 
             # Create mock functional.txt
             functional_report = report_dir / "functional.txt"
-            functional_report.write_text("""
+            functional_report.write_text(
+                """
 Covergroup: apb_master_cg
   Coverage: 67.5%
   Instance: apb_master_coverage
@@ -101,7 +102,8 @@ Covergroup: apb_slave_cg
   Coverpoint: cp_psel
     Coverage: 100.0%
     Bin: psel_active   Hits: 25    Goal: 1    Status: Covered
-""")
+"""
+            )
 
             # Use old parser for text-based functional coverage
             groups = parser._parse_functional_coverage_old(functional_report)
@@ -130,12 +132,14 @@ Covergroup: apb_slave_cg
         with TemporaryDirectory() as tmpdir:
             report_dir = Path(tmpdir)
             code_report = report_dir / "code.txt"
-            code_report.write_text("""
+            code_report.write_text(
+                """
 name                          Block                 Expression            Toggle                 Statement             Fsm Average
 ------------------------------------------------------------------------------------------------------------------------------------
 hdl_top                       85.3% (15/16)         n/a                   91.5% (2/2)            72.1%                 100.0% (1/1)
 apb_slave                     90.0% (9/10)          n/a                   85.0% (17/20)          80.0%                 n/a
-""")
+"""
+            )
 
             code_cov = parser._parse_code_coverage(code_report)
             # Parser averages all values from the table
@@ -151,19 +155,23 @@ apb_slave                     90.0% (9/10)          n/a                   85.0% 
             report_dir = Path(tmpdir)
 
             # Create functional report
-            (report_dir / "functional.txt").write_text("""
+            (report_dir / "functional.txt").write_text(
+                """
 Covergroup: test_cg
   Coverage: 80.0%
   Instance: test_inst
   Bin: bin1    Hits: 8    Goal: 10    Status: Partial
-""")
+"""
+            )
 
             # Create code report
-            (report_dir / "code.txt").write_text("""
+            (report_dir / "code.txt").write_text(
+                """
 name                     Block            Expression       Toggle           Statement
 ---------------------------------------------------------------------------------------
 hdl_top                  90.0% (15/16)    n/a              n/a              85.0%
-""")
+"""
+            )
 
             # Parse full report
             report = parser.parse(report_dir)
@@ -182,12 +190,14 @@ hdl_top                  90.0% (15/16)    n/a              n/a              85.0
             report_dir = Path(tmpdir)
 
             # Only create summary (no code.txt)
-            (report_dir / "summary.txt").write_text("""
+            (report_dir / "summary.txt").write_text(
+                """
 Coverage Summary:
 Statement    1234/5000    75.0%
 Branch       567/890      65.0%
 Toggle       2345/3000    80.0%
-""")
+"""
+            )
 
             report = parser.parse(report_dir)
             assert report.code_coverage.statements_pct == 75.0

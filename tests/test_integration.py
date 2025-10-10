@@ -32,7 +32,7 @@ def temp_workspace():
 # Ingest/Build Pipeline Tests
 @pytest.mark.skipif(
     not __import__("os").getenv("ANTHROPIC_API_KEY"),
-    reason="Requires ANTHROPIC_API_KEY environment variable"
+    reason="Requires ANTHROPIC_API_KEY environment variable",
 )
 def test_ingest_creates_profile(test_repo, temp_workspace) -> None:
     """Test that ingest creates a valid profile."""
@@ -47,6 +47,7 @@ def test_ingest_creates_profile(test_repo, temp_workspace) -> None:
 
     # Load and validate profile
     import yaml
+
     with open(profile_path) as f:
         profile = yaml.safe_load(f)
 
@@ -57,7 +58,7 @@ def test_ingest_creates_profile(test_repo, temp_workspace) -> None:
 
 @pytest.mark.skipif(
     not __import__("os").getenv("ANTHROPIC_API_KEY"),
-    reason="Requires ANTHROPIC_API_KEY environment variable"
+    reason="Requires ANTHROPIC_API_KEY environment variable",
 )
 def test_build_creates_gym(test_repo, temp_workspace) -> None:
     """Test that build creates a complete gym."""
@@ -81,7 +82,7 @@ def test_build_creates_gym(test_repo, temp_workspace) -> None:
 
 @pytest.mark.skipif(
     not __import__("os").getenv("ANTHROPIC_API_KEY"),
-    reason="Requires ANTHROPIC_API_KEY environment variable"
+    reason="Requires ANTHROPIC_API_KEY environment variable",
 )
 def test_end_to_end_pipeline(test_repo, temp_workspace) -> None:
     """Test complete pipeline: ingest -> build -> validate."""
@@ -114,7 +115,7 @@ def test_end_to_end_pipeline(test_repo, temp_workspace) -> None:
 # AI Analyzer Tests
 @pytest.mark.skipif(
     not __import__("os").getenv("ANTHROPIC_API_KEY"),
-    reason="Requires ANTHROPIC_API_KEY environment variable"
+    reason="Requires ANTHROPIC_API_KEY environment variable",
 )
 def test_ai_analyzer_finds_tests(test_repo) -> None:
     """Test that AI analyzer finds tests."""
@@ -139,7 +140,7 @@ def test_ai_analyzer_finds_tests(test_repo) -> None:
 
 @pytest.mark.skipif(
     not __import__("os").getenv("ANTHROPIC_API_KEY"),
-    reason="Requires ANTHROPIC_API_KEY environment variable"
+    reason="Requires ANTHROPIC_API_KEY environment variable",
 )
 def test_ai_analyzer_detects_simulators(test_repo) -> None:
     """Test that AI analyzer detects simulators."""
@@ -157,7 +158,7 @@ def test_ai_analyzer_detects_simulators(test_repo) -> None:
 # Task Generation Tests
 @pytest.mark.skipif(
     not __import__("os").getenv("ANTHROPIC_API_KEY"),
-    reason="Requires ANTHROPIC_API_KEY environment variable"
+    reason="Requires ANTHROPIC_API_KEY environment variable",
 )
 def test_task_generator_creates_tasks() -> None:
     """Test that task generator creates valid tasks."""
@@ -168,20 +169,12 @@ def test_task_generator_creates_tasks() -> None:
     analysis = RepoAnalysis(
         repo_root=Path("/tmp/test"),
         tests=[
-            UVMTest(
-                name="test_write",
-                file_path=Path("/tmp/test.sv"),
-                base_class="base_test"
-            ),
-            UVMTest(
-                name="test_read",
-                file_path=Path("/tmp/test2.sv"),
-                base_class="base_test"
-            ),
+            UVMTest(name="test_write", file_path=Path("/tmp/test.sv"), base_class="base_test"),
+            UVMTest(name="test_read", file_path=Path("/tmp/test2.sv"), base_class="base_test"),
         ],
         covergroups=["cg1.bin1", "cg2.bin2"],
         build_system=BuildSystem.MAKEFILE,
-        detected_simulators=[Simulator.QUESTA]
+        detected_simulators=[Simulator.QUESTA],
     )
 
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -192,18 +185,13 @@ def test_task_generator_creates_tasks() -> None:
         profile_config = {
             "repo_path": "/tmp/test",
             "build": {
-                "questa": {
-                    "work_dir": "work",
-                    "compile_cmd": "make compile",
-                    "run_cmd": "make run"
-                }
-            }
+                "questa": {"work_dir": "work", "compile_cmd": "make compile", "run_cmd": "make run"}
+            },
         }
 
         generator = TaskGenerator(analysis, profile_config)
         tasks = generator.generate_tasks(
-            output_dir=output_dir,
-            smoke_tests=[]  # All tests become tasks
+            output_dir=output_dir, smoke_tests=[]  # All tests become tasks
         )
 
         # Should generate tasks for all tests
@@ -239,11 +227,7 @@ def test_xcelium_adapter_availability_check() -> None:
 
     adapter = XceliumAdapter(
         repo_root=Path.cwd(),
-        profile_config={
-            "work_dir": "work",
-            "compile_cmd": "xrun -compile",
-            "run_cmd": "xrun -R"
-        }
+        profile_config={"work_dir": "work", "compile_cmd": "xrun -compile", "run_cmd": "xrun -R"},
     )
 
     # check_available should return bool without crashing
@@ -260,7 +244,8 @@ def test_xcelium_parser_integration() -> None:
         report_dir = Path(tmpdir)
 
         # Create realistic IMC reports
-        (report_dir / "functional.txt").write_text("""
+        (report_dir / "functional.txt").write_text(
+            """
 Covergroup: apb_coverage_cg
   Coverage: 85.5%
   Instance: apb_env.coverage
@@ -277,13 +262,16 @@ Covergroup: apb_slave_cg
   Coverpoint: cp_data
     Coverage: 90.0%
     Bin: data_zero    Hits: 200    Goal: 10    Status: Covered
-""")
+"""
+        )
 
-        (report_dir / "code.txt").write_text("""
+        (report_dir / "code.txt").write_text(
+            """
 name                          Block                 Expression            Toggle                 Statement             Fsm Average
 ------------------------------------------------------------------------------------------------------------------------------------
 hdl_top                       75.5% (15/20)         n/a                   82.1% (10/12)          68.3%                 95.0% (1/1)
-""")
+"""
+        )
 
         parser = XceliumCoverageParser()
         report = parser.parse(report_dir)

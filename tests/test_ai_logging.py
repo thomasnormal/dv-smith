@@ -193,15 +193,13 @@ class TestLogAICall:
 
         assert entry["messages"] == []
 
-    def test_log_ai_call_doesnt_crash_on_write_error(
-        self, tmp_path: Path, caplog
-    ) -> None:
+    def test_log_ai_call_doesnt_crash_on_write_error(self, tmp_path: Path, caplog) -> None:
         """Test that log_ai_call doesn't crash if writing fails."""
         import logging
-        
+
         # Set caplog to capture WARNING level from the dvsmith logger
         caplog.set_level(logging.WARNING, logger="dvsmith")
-        
+
         # Use an invalid path (file instead of directory)
         log_file = tmp_path / "file.txt"
         log_file.write_text("existing file")

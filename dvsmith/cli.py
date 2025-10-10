@@ -8,10 +8,10 @@ import sys
 # The CLAUDECODE env var causes claude-agent-sdk to try connecting to IDE hooks
 # which can hang in non-interactive or background processes
 # Also clear it if running in Amp (AGENT=amp), which uses Claude Code infrastructure
-if os.getenv('CLAUDECODE') or os.getenv('AGENT') == 'amp':
-    os.environ.pop('CLAUDECODE', None)
+if os.getenv("CLAUDECODE") or os.getenv("AGENT") == "amp":
+    os.environ.pop("CLAUDECODE", None)
     # Set a marker to prevent claude CLI from detecting parent IDE
-    os.environ['CLAUDE_NO_IDE'] = '1'
+    os.environ["CLAUDE_NO_IDE"] = "1"
     # Redirect stdout to stderr to avoid stdout hooks that can cause hangs
     sys.stderr.write("[DVSMITH] Redirecting stdout to stderr to avoid Claude Code hooks\n")
     sys.stderr.flush()
@@ -30,6 +30,7 @@ load_dotenv()
 
 # Configure logging
 from .config import get_logger
+
 logger = get_logger(__name__)
 
 # Import adapters to trigger registration
@@ -66,8 +67,13 @@ class DVSmith:
         self.gyms_dir.mkdir(exist_ok=True)
         self.artifacts_dir.mkdir(exist_ok=True)
 
-    def ingest(self, repo_url: str, name: Optional[str] = None,
-               commit: Optional[str] = None, hints: Optional[dict] = None) -> None:
+    def ingest(
+        self,
+        repo_url: str,
+        name: Optional[str] = None,
+        commit: Optional[str] = None,
+        hints: Optional[dict] = None,
+    ) -> None:
         """Analyze a repository and generate a profile.
 
         Args:
@@ -101,15 +107,16 @@ class DVSmith:
             if repo_path.exists():
                 logger.info(f"Removing existing clone at: {repo_path}")
                 import shutil
+
                 shutil.rmtree(repo_path)
-            
+
             logger.info(f"Cloning repository to: {repo_path}")
             try:
                 result = subprocess.run(
                     ["git", "clone", repo_url, str(repo_path)],
                     capture_output=True,
                     text=True,
-                    timeout=300
+                    timeout=300,
                 )
                 if result.returncode != 0:
                     logger.error(f"Failed to clone repository: {result.stderr}")
@@ -127,10 +134,7 @@ class DVSmith:
                 logger.info(f"Checking out commit: {commit}")
                 try:
                     subprocess.run(
-                        ["git", "checkout", commit],
-                        cwd=repo_path,
-                        capture_output=True,
-                        check=True
+                        ["git", "checkout", commit], cwd=repo_path, capture_output=True, check=True
                     )
                 except subprocess.CalledProcessError as e:
                     logger.error(f"Failed to checkout commit: {e.stderr}")
@@ -165,7 +169,9 @@ class DVSmith:
                 logger.info(f"✓ Found {len(analysis.sequences)} sequences")
                 logger.info(f"✓ Found {len(analysis.covergroups)} covergroups")
                 logger.info(f"✓ Build system: {analysis.build_system}")
-                logger.info(f"✓ Detected simulators: {[s.value for s in analysis.detected_simulators]}")
+                logger.info(
+                    f"✓ Detected simulators: {[s.value for s in analysis.detected_simulators]}"
+                )
 
             except Exception as e:
                 pbar.close()
@@ -178,7 +184,7 @@ class DVSmith:
             profile = self._generate_profile(name, repo_path, analysis)
 
             # Cache the full analysis to avoid re-analyzing in build
-            profile['_analysis_cache'] = analysis.to_dict()
+            profile["_analysis_cache"] = analysis.to_dict()
             pbar.update(1)
 
             # Step 3: Save profile
@@ -192,7 +198,13 @@ class DVSmith:
         logger.info(f"Profile saved: {profile_path}")
         logger.info("Ingest complete!")
 
-    def build(self, name: str, simulators: Optional[list[str]] = None, task_types: str = "stimulus", skip_verification: bool = False) -> None:
+    def build(
+        self,
+        name: str,
+        simulators: Optional[list[str]] = None,
+        task_types: str = "stimulus",
+        skip_verification: bool = False,
+    ) -> None:
         """Build a gym from a profile.
 
         Args:
@@ -233,11 +245,12 @@ class DVSmith:
             sys.exit(1)
 
         # Try to load cached analysis from profile
-        if '_analysis_cache' in profile:
+        if "_analysis_cache" in profile:
             logger.info(f"Loading cached analysis from {profile_path}...")
             try:
                 from .core.models import RepoAnalysis
-                analysis = RepoAnalysis.from_dict(profile['_analysis_cache'], repo_root=repo_path)
+
+                analysis = RepoAnalysis.from_dict(profile["_analysis_cache"], repo_root=repo_path)
                 logger.info(f"✓ Loaded {len(analysis.tests)} tests from {profile_path}")
             except Exception as e:
                 logger.warning(f"Cache load failed: {e}")
@@ -273,7 +286,9 @@ class DVSmith:
 
         # Remove only task test files, keep infrastructure
         removed_count = 0
-        for test_file_path in tqdm(cleanup_result['remove'], desc="Removing task tests", unit="file", leave=False):
+        for test_file_path in tqdm(
+            cleanup_result["remove"], desc="Removing task tests", unit="file", leave=False
+        ):
             test_file = Path(test_file_path)
             try:
                 # Calculate relative path from repo to test file
@@ -298,12 +313,14 @@ class DVSmith:
 
         # Step 1c: Clean package includes for removed tests
         logger.info("Step 1c: Cleaning package includes...")
-        removed_test_names = [Path(test_file_path).name for test_file_path in cleanup_result['remove']]
+        removed_test_names = [
+            Path(test_file_path).name for test_file_path in cleanup_result["remove"]
+        ]
         include_cleanup = cleaner.clean_package_includes(removed_test_names)
 
-        if include_cleanup['modified_files']:
+        if include_cleanup["modified_files"]:
             logger.info(f"Cleaned {len(include_cleanup['modified_files'])} package file(s)")
-        if include_cleanup.get('errors'):
+        if include_cleanup.get("errors"):
             logger.warning(f"Warnings: {len(include_cleanup['errors'])} package cleanup issues")
 
         # Step 2: Generate task specifications
@@ -313,6 +330,7 @@ class DVSmith:
 
         # Parse task types
         from .core.models import TaskCategory
+
         selected_categories = []
         for token in task_types.split(","):
             tok = token.strip().lower()
@@ -351,7 +369,7 @@ class DVSmith:
             "profile": str(profile_path),
             "repo_path": str(repo_path),
             "task_count": len(tasks),
-            "simulators": profile["simulators"]
+            "simulators": profile["simulators"],
         }
 
         metadata_path = gym_dir / "gym_metadata.yaml"
@@ -365,17 +383,17 @@ class DVSmith:
                 "compilation": True,  # Assume OK when skipped
                 "base_test_exists": True,
                 "errors": [],
-                "missing_files": []
+                "missing_files": [],
             }
         else:
             logger.info("Verifying gym integrity...")
             validation = cleaner.verify_integrity(profile)
 
-        if not validation['compilation']:
+        if not validation["compilation"]:
             logger.warning("⚠️  WARNING: Testbench compilation failed!")
 
             # Show specific errors if available
-            errors = validation.get('errors', [])
+            errors = validation.get("errors", [])
             if errors:
                 logger.error("Errors encountered:")
                 for error in errors[:5]:  # Limit to 5 errors
@@ -384,24 +402,24 @@ class DVSmith:
                 logger.error("  No specific errors reported by verification agent")
 
             # Show missing files if any
-            if validation.get('missing_files'):
+            if validation.get("missing_files"):
                 logger.error(f"Missing files: {', '.join(validation['missing_files'][:5])}")
 
             # Show agent responses for debugging if no errors reported
-            if not errors and validation.get('agent_responses'):
+            if not errors and validation.get("agent_responses"):
                 logger.debug("Agent output (for debugging):")
-                for resp in validation['agent_responses'][:2]:
+                for resp in validation["agent_responses"][:2]:
                     logger.debug(f"  {resp[:150]}...")
 
             logger.warning("This gym may not be functional. Check test directory structure.")
             logger.info("You can try manual compilation: cd sim/cadence_sim && make compile")
-        elif not validation['base_test_exists']:
+        elif not validation["base_test_exists"]:
             logger.warning("⚠️  WARNING: Base test file not found!")
             logger.warning("Generated tasks may not be solvable without base test infrastructure.")
         else:
             logger.info("✓ Testbench structure validated")
             logger.info("✓ Base test infrastructure present")
-            if validation['compilation']:
+            if validation["compilation"]:
                 logger.info("✓ Compilation verified successful")
 
         # Step 6: Create HOWTO guide for agents
@@ -463,8 +481,13 @@ class DVSmith:
             logger.error("\n✗ Validation failed")
             sys.exit(1)
 
-    def eval(self, task_path: str, patch_path: str,
-             simulator: Optional[str] = None, output: Optional[str] = None) -> None:
+    def eval(
+        self,
+        task_path: str,
+        patch_path: str,
+        simulator: Optional[str] = None,
+        output: Optional[str] = None,
+    ) -> None:
         """Evaluate a solution against a task.
 
         Args:
@@ -551,6 +574,7 @@ class DVSmith:
         except Exception as e:
             print(f"[ERROR] Evaluation failed: {e}")
             import traceback
+
             traceback.print_exc()
             sys.exit(1)
 
@@ -584,6 +608,7 @@ class DVSmith:
         # 8. Write output file if requested
         if output:
             import json
+
             output_path = Path(output)
             output_path.parent.mkdir(exist_ok=True, parents=True)
 
@@ -598,7 +623,9 @@ class DVSmith:
                 "functional_bins_missed": result.functional_bins_missed,
                 "thresholds_met": result.thresholds_met,
                 "log_path": str(result.log_path) if result.log_path else None,
-                "coverage_db_path": str(result.coverage_db_path) if result.coverage_db_path else None
+                "coverage_db_path": (
+                    str(result.coverage_db_path) if result.coverage_db_path else None
+                ),
             }
 
             with open(output_path, "w") as f:
@@ -627,20 +654,20 @@ class DVSmith:
         """
         from .log_viewer import load_ai_calls, display_summary, display_calls_conversation
         from rich.console import Console
-        
+
         console = Console()
         calls = load_ai_calls(limit=tail if tail > 0 else None)
-        
+
         if not calls:
             console.print("[yellow]No AI calls found in log[/yellow]")
             return
-        
+
         # Show summary
         display_summary(calls, console)
-        
+
         # Show conversation
         display_calls_conversation(calls, console)
-        
+
         console.print(f"\n{'─' * 80}")
         console.print(f"[dim]Showing {len(calls)} entries | Use --tail N for more[/dim]")
 
@@ -654,6 +681,7 @@ class DVSmith:
         """
         logger.debug("Inside _setup_gym_structure, importing shutil...")
         import shutil
+
         logger.debug("shutil imported")
 
         # Create basic directories
@@ -662,9 +690,9 @@ class DVSmith:
             gym_dir / "sequences",
             gym_dir / "tasks",
             gym_dir / "backups" / "original_tests",
-            gym_dir / "work"
+            gym_dir / "work",
         ]
-        
+
         logger.debug(f"Creating {len(directories)} directories...")
         for dir_path in tqdm(directories, desc="Creating directories", unit="dir", leave=False):
             dir_path.mkdir(exist_ok=True, parents=True)
@@ -749,44 +777,49 @@ class DVSmith:
             "simulators": [s.value for s in analysis.detected_simulators] or ["questa"],
             "paths": {
                 "root": ".",
-                "tests": str(analysis.tests_dir.relative_to(repo_path)) if analysis.tests_dir else "src/hvl_top/test",
-                "sequences": str(analysis.sequences_dir.relative_to(repo_path)) if analysis.sequences_dir else "src/hvl_top/test/sequences",
-                "env": str(analysis.env_dir.relative_to(repo_path)) if analysis.env_dir else "src/hvl_top/env",
+                "tests": (
+                    str(analysis.tests_dir.relative_to(repo_path))
+                    if analysis.tests_dir
+                    else "src/hvl_top/test"
+                ),
+                "sequences": (
+                    str(analysis.sequences_dir.relative_to(repo_path))
+                    if analysis.sequences_dir
+                    else "src/hvl_top/test/sequences"
+                ),
+                "env": (
+                    str(analysis.env_dir.relative_to(repo_path))
+                    if analysis.env_dir
+                    else "src/hvl_top/env"
+                ),
             },
             "build": {},
             "coverage": {},
             "grading": {
                 "smoke_tests": [t.name for t in analysis.tests if "base" in t.name.lower()][:2],
-                "weights": {
-                    "functional_coverage": 0.6,
-                    "code_coverage": 0.3,
-                    "health": 0.1
-                },
+                "weights": {"functional_coverage": 0.6, "code_coverage": 0.3, "health": 0.1},
                 "thresholds": {
-                    "functional": {
-                        "min_pct": 80,
-                        "strategy": "any_of"
-                    },
+                    "functional": {"min_pct": 80, "strategy": "any_of"},
                     "code": {
                         "statements_min_pct": 70,
                         "branches_min_pct": 60,
-                        "toggles_min_pct": 50
+                        "toggles_min_pct": 50,
                     },
                     "health": {
                         "max_scoreboard_errors": 0,
                         "max_uvm_errors": 0,
                         "max_uvm_fatals": 0,
-                        "all_assertions_pass": True
-                    }
-                }
+                        "all_assertions_pass": True,
+                    },
+                },
             },
             "metadata": {
                 "test_count": len(analysis.tests),
                 "sequence_count": len(analysis.sequences),
                 "covergroup_count": len(analysis.covergroups),
                 "build_system": analysis.build_system.value if analysis.build_system else "unknown",
-                "covergroups": analysis.covergroups[:10]  # Sample of covergroups
-            }
+                "covergroups": analysis.covergroups[:10],  # Sample of covergroups
+            },
         }
 
         # Add simulator-specific build configs
@@ -799,7 +832,7 @@ class DVSmith:
                 }
                 profile["coverage"]["questa"] = {
                     "report_cmd": "vcover report -details -output {output} {ucdb}",
-                    "functional_covergroups": analysis.covergroups[:5]
+                    "functional_covergroups": analysis.covergroups[:5],
                 }
             elif sim == Simulator.XCELIUM:
                 profile["build"]["xcelium"] = {
@@ -841,14 +874,14 @@ Examples:
 
   # View AI call logs
   dvsmith ai-logs --tail 20 --full
-        """
+        """,
     )
 
     parser.add_argument(
         "--workspace",
         type=Path,
         default=Path("./dvsmith_workspace"),
-        help="Workspace directory (default: ./dvsmith_workspace)"
+        help="Workspace directory (default: ./dvsmith_workspace)",
     )
 
     subparsers = parser.add_subparsers(dest="command", help="Command to execute")
@@ -867,12 +900,10 @@ Examples:
     build_parser.add_argument(
         "--tasks",
         default="stimulus",
-        help="Task types to generate: stimulus, coverage_func, all (default: %(default)s)"
+        help="Task types to generate: stimulus, coverage_func, all (default: %(default)s)",
     )
     build_parser.add_argument(
-        "--skip-verification",
-        action="store_true",
-        help="Skip testbench compilation verification"
+        "--skip-verification", action="store_true", help="Skip testbench compilation verification"
     )
 
     # Validate command
@@ -892,7 +923,9 @@ Examples:
 
     # AI logs command
     ai_logs_parser = subparsers.add_parser("ai-logs", help="Show AI call logs")
-    ai_logs_parser.add_argument("--tail", type=int, default=10, help="Number of recent entries to show (default: 10)")
+    ai_logs_parser.add_argument(
+        "--tail", type=int, default=10, help="Number of recent entries to show (default: 10)"
+    )
     ai_logs_parser.add_argument("--full", action="store_true", help="Show full log content")
 
     args = parser.parse_args()
@@ -909,7 +942,12 @@ Examples:
         app.ingest(args.repo, name=args.name, commit=args.commit)
     elif args.command == "build":
         sims = args.sim.split(",") if args.sim else None
-        app.build(args.name, simulators=sims, task_types=args.tasks, skip_verification=args.skip_verification)
+        app.build(
+            args.name,
+            simulators=sims,
+            task_types=args.tasks,
+            skip_verification=args.skip_verification,
+        )
     elif args.command == "validate":
         app.validate(args.name, simulator=args.sim)
     elif args.command == "eval":

@@ -27,6 +27,7 @@ from claude_agent_sdk.types import (
 
 # Configure logging and enable Anthropic SDK debug logging if needed
 from ..config import get_logger
+
 logger = get_logger(__name__)
 
 if os.getenv("DVSMITH_DEBUG", "").lower() in ("1", "true", "yes"):
@@ -104,7 +105,7 @@ async def query_with_pydantic_response(
     """
     # Build JSON Schema from Pydantic model
     schema = response_model.model_json_schema()
-    
+
     # Extract only the properties and required fields for the tool schema
     # The tool parameters should match the model's fields directly
     tool_schema = {
@@ -118,7 +119,7 @@ async def query_with_pydantic_response(
     agent_messages = []  # Accumulate all agent messages
 
     # Log location on first call
-    if not hasattr(log_ai_call, '_printed_location'):
+    if not hasattr(log_ai_call, "_printed_location"):
         logger.info(f"Logging AI calls to: {AI_LOG_FILE}")
         log_ai_call._printed_location = True
 
@@ -180,10 +181,7 @@ async def query_with_pydantic_response(
         permission_mode="bypassPermissions",
         cwd=cwd,
         hooks={
-            "PostToolUse": [HookMatcher(
-                matcher="mcp__answer__FinalAnswer",
-                hooks=[capture_final]
-            )],
+            "PostToolUse": [HookMatcher(matcher="mcp__answer__FinalAnswer", hooks=[capture_final])],
             "Stop": [HookMatcher(hooks=[enforce_final_before_stop])],
         },
     )
@@ -191,6 +189,7 @@ async def query_with_pydantic_response(
     # Replace .claude.json with minimal config to avoid hook recursion
     import shutil
     import json as json_module
+
     claude_json = Path.home() / ".claude.json"
     claude_backup = Path.home() / ".claude.json.dvsmith_backup"
     backed_up = False
@@ -200,10 +199,7 @@ async def query_with_pydantic_response(
         backed_up = True
 
     # Create minimal config with no hooks
-    minimal_config = {
-        "version": "1.0",
-        "hooks": []
-    }
+    minimal_config = {"version": "1.0", "hooks": []}
     claude_json.write_text(json_module.dumps(minimal_config))
 
     async with ClaudeSDKClient(options=options) as client:
@@ -212,50 +208,50 @@ async def query_with_pydantic_response(
         async for message in client.receive_response():
             # Debug logging: show raw message structure
             logger.debug(f"Received message type: {type(message).__name__}")
-            if hasattr(message, '__dict__'):
+            if hasattr(message, "__dict__"):
                 logger.debug(f"Message attributes: {message.__dict__}")
 
             # Handle AssistantMessage which contains content blocks
             if isinstance(message, AssistantMessage):
                 for block in message.content:
                     if isinstance(block, TextBlock):
-                        agent_messages.append({
-                            'type': 'text',
-                            'text': block.text
-                        })
+                        agent_messages.append({"type": "text", "text": block.text})
                     elif isinstance(block, ThinkingBlock):
-                        agent_messages.append({
-                            'type': 'thinking',
-                            'thinking': block.thinking,
-                            'signature': block.signature
-                        })
+                        agent_messages.append(
+                            {
+                                "type": "thinking",
+                                "thinking": block.thinking,
+                                "signature": block.signature,
+                            }
+                        )
                     elif isinstance(block, ToolUseBlock):
-                        agent_messages.append({
-                            'type': 'tool_use',
-                            'tool_id': block.id,
-                            'tool_name': block.name,
-                            'input': block.input
-                        })
+                        agent_messages.append(
+                            {
+                                "type": "tool_use",
+                                "tool_id": block.id,
+                                "tool_name": block.name,
+                                "input": block.input,
+                            }
+                        )
                     elif isinstance(block, ToolResultBlock):
                         # Limit content to 500 chars for log size
                         content_str = str(block.content) if block.content is not None else ""
-                        agent_messages.append({
-                            'type': 'tool_result',
-                            'tool_use_id': block.tool_use_id,
-                            'content': content_str[:500],
-                            'is_error': block.is_error
-                        })
+                        agent_messages.append(
+                            {
+                                "type": "tool_result",
+                                "tool_use_id": block.tool_use_id,
+                                "content": content_str[:500],
+                                "is_error": block.is_error,
+                            }
+                        )
             # Log other message types for debugging
             else:
-                agent_messages.append({
-                    'type': type(message).__name__,
-                    'raw': str(message)[:500]
-                })
+                agent_messages.append({"type": type(message).__name__, "raw": str(message)[:500]})
 
     # Log successful call
     duration_ms = (time.time() - start_time) * 1000
-    response_data = final_obj.model_dump() if hasattr(final_obj, 'model_dump') else final_obj
-    response_model_name = getattr(response_model, '__name__', str(response_model))
+    response_data = final_obj.model_dump() if hasattr(final_obj, "model_dump") else final_obj
+    response_model_name = getattr(response_model, "__name__", str(response_model))
     log_ai_call(
         prompt=prompt,
         response_model_name=response_model_name,
@@ -281,6 +277,4 @@ async def query_with_pydantic_response(
             "Check that the prompt is clear about calling FinalAnswer."
         )
 
-
     return final_obj
-

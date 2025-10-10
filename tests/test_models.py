@@ -64,10 +64,7 @@ class TestCoverageModels:
     def test_health_metrics(self) -> None:
         """Test HealthMetrics model."""
         health = HealthMetrics(
-            uvm_errors=5,
-            uvm_fatals=1,
-            scoreboard_errors=3,
-            assertion_failures=2
+            uvm_errors=5, uvm_fatals=1, scoreboard_errors=3, assertion_failures=2
         )
         assert health.uvm_errors == 5
         assert health.uvm_fatals == 1
@@ -92,7 +89,7 @@ class TestUVMModels:
             name="apb_write_test",
             file_path=Path("/path/to/test.sv"),
             base_class="apb_base_test",
-            description="Test write operations"
+            description="Test write operations",
         )
         assert test.name == "apb_write_test"
         assert test.file_path == Path("/path/to/test.sv")
@@ -102,9 +99,7 @@ class TestUVMModels:
     def test_uvm_sequence_creation(self) -> None:
         """Test UVMSequence model."""
         seq = UVMSequence(
-            name="apb_write_seq",
-            file_path=Path("/path/to/seq.sv"),
-            base_class="uvm_sequence"
+            name="apb_write_seq", file_path=Path("/path/to/seq.sv"), base_class="uvm_sequence"
         )
         assert seq.name == "apb_write_seq"
         assert seq.file_path == Path("/path/to/seq.sv")
@@ -122,7 +117,7 @@ class TestTaskModels:
             code_statements_min_pct=70.0,
             code_branches_min_pct=60.0,
             max_uvm_errors=0,
-            weights={"functional_coverage": 0.5, "code_coverage": 0.3, "health": 0.2}
+            weights={"functional_coverage": 0.5, "code_coverage": 0.3, "health": 0.2},
         )
         assert criteria.functional_min_pct == 80.0
         assert criteria.code_statements_min_pct == 70.0
@@ -134,10 +129,7 @@ class TestTaskModels:
         """Test TaskSpec markdown generation."""
         from dvsmith.core.models import TaskLevel
 
-        criteria = AcceptanceCriteria(
-            functional_min_pct=80.0,
-            code_statements_min_pct=70.0
-        )
+        criteria = AcceptanceCriteria(functional_min_pct=80.0, code_statements_min_pct=70.0)
         task = TaskSpec(
             id="test_task_001",
             name="apb_write_test",
@@ -146,7 +138,7 @@ class TestTaskModels:
             description="Write a UVM test for APB write operations",
             goal="Test APB write functionality",
             acceptance=criteria,
-            hints=["Use apb_write_seq", "Check pready signal"]
+            hints=["Use apb_write_seq", "Check pready signal"],
         )
 
         md = task.to_markdown()
@@ -170,7 +162,7 @@ class TestEvaluationModels:
             coverage_report=coverage,
             functional_score=90.0,
             code_coverage_score=80.0,
-            health_score=100.0
+            health_score=100.0,
         )
         assert result.task_id == "test_001"
         assert result.passed is True
@@ -188,7 +180,7 @@ class TestEvaluationModels:
             functional_score=50.0,
             code_coverage_score=40.0,
             health_score=0.0,
-            functional_bins_missed=["bin1", "bin2"]
+            functional_bins_missed=["bin1", "bin2"],
         )
         assert result.passed is False
         assert result.score == 45.0

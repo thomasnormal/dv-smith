@@ -49,12 +49,7 @@ class XceliumAdapter(SimulatorAdapter):
 
         # Try to get version
         try:
-            result = subprocess.run(
-                ["xrun", "-version"],
-                capture_output=True,
-                text=True,
-                timeout=5
-            )
+            result = subprocess.run(["xrun", "-version"], capture_output=True, text=True, timeout=5)
             return result.returncode == 0
         except Exception:
             return False
@@ -89,7 +84,7 @@ class XceliumAdapter(SimulatorAdapter):
                 cwd=self.repo_root,
                 capture_output=True,
                 text=True,
-                timeout=600  # 10 minute compile timeout
+                timeout=600,  # 10 minute compile timeout
             )
 
             compile_log = work_dir / "compile.log"
@@ -103,7 +98,9 @@ class XceliumAdapter(SimulatorAdapter):
                 logger.error(f"Compilation failed. See {compile_log}")
                 if has_errors:
                     # Print first few error lines
-                    error_lines = [line for line in output.split('\n') if '*E,' in line or 'Error-' in line]
+                    error_lines = [
+                        line for line in output.split("\n") if "*E," in line or "Error-" in line
+                    ]
                     for line in error_lines[:5]:
                         logger.error(f"  {line}")
                 return False
@@ -136,7 +133,7 @@ class XceliumAdapter(SimulatorAdapter):
         replacements = {
             "test": sim_config.test_name,
             "seed": str(sim_config.seed) if sim_config.seed else "random",
-            "verbosity": sim_config.uvm_verbosity
+            "verbosity": sim_config.uvm_verbosity,
         }
 
         for key, value in replacements.items():
@@ -152,6 +149,7 @@ class XceliumAdapter(SimulatorAdapter):
         logger.debug(f"Command: {run_cmd}")
 
         import time
+
         start_time = time.time()
 
         try:
@@ -161,7 +159,7 @@ class XceliumAdapter(SimulatorAdapter):
                 cwd=self.repo_root,
                 capture_output=True,
                 text=True,
-                timeout=sim_config.timeout_sec
+                timeout=sim_config.timeout_sec,
             )
 
             runtime = time.time() - start_time
@@ -192,7 +190,7 @@ class XceliumAdapter(SimulatorAdapter):
                 stdout=result.stdout,
                 stderr=result.stderr,
                 runtime_sec=runtime,
-                timed_out=False
+                timed_out=False,
             )
 
         except subprocess.TimeoutExpired:
@@ -205,7 +203,7 @@ class XceliumAdapter(SimulatorAdapter):
                 log_path=log_file,
                 coverage_db_path=None,
                 runtime_sec=runtime,
-                timed_out=True
+                timed_out=True,
             )
 
         except Exception as e:
@@ -218,7 +216,7 @@ class XceliumAdapter(SimulatorAdapter):
                 log_path=log_file,
                 coverage_db_path=None,
                 runtime_sec=runtime,
-                timed_out=False
+                timed_out=False,
             )
 
     def extract_coverage(self, sim_result: SimulationResult) -> CoverageReport:
@@ -256,30 +254,22 @@ class XceliumAdapter(SimulatorAdapter):
 
         # Generate functional coverage report
         func_report = report_dir / "functional.txt"
-        func_cmd = f"imc -execcmd 'load -run {test_dir}; report -summary -grading covered' > {func_report}"
+        func_cmd = (
+            f"imc -execcmd 'load -run {test_dir}; report -summary -grading covered' > {func_report}"
+        )
 
         # Generate code coverage report
         code_report = report_dir / "code.txt"
-        code_cmd = f"imc -execcmd 'load -run {test_dir}; report -summary -metrics all' > {code_report}"
+        code_cmd = (
+            f"imc -execcmd 'load -run {test_dir}; report -summary -metrics all' > {code_report}"
+        )
 
         try:
             # Run functional coverage report
-            subprocess.run(
-                func_cmd,
-                shell=True,
-                capture_output=True,
-                text=True,
-                timeout=60
-            )
+            subprocess.run(func_cmd, shell=True, capture_output=True, text=True, timeout=60)
 
             # Run code coverage report
-            subprocess.run(
-                code_cmd,
-                shell=True,
-                capture_output=True,
-                text=True,
-                timeout=60
-            )
+            subprocess.run(code_cmd, shell=True, capture_output=True, text=True, timeout=60)
 
             # Parse the reports
             return self.parser.parse(report_dir, sim_result.log_path)
@@ -308,11 +298,7 @@ class XceliumAdapter(SimulatorAdapter):
 
         try:
             result = subprocess.run(
-                merge_cmd,
-                shell=True,
-                capture_output=True,
-                text=True,
-                timeout=300
+                merge_cmd, shell=True, capture_output=True, text=True, timeout=300
             )
 
             if result.returncode != 0:
