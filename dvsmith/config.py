@@ -41,8 +41,8 @@ def setup_logging() -> logging.Logger:
     handler.setFormatter(formatter)
     logger.addHandler(handler)
     
-    # Prevent propagation to root logger
-    logger.propagate = False
+    # Allow propagation for testing (pytest caplog needs this)
+    logger.propagate = True
     
     return logger
 
