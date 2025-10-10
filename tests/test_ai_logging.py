@@ -194,7 +194,7 @@ class TestLogAICall:
         assert entry["messages"] == []
 
     def test_log_ai_call_doesnt_crash_on_write_error(
-        self, tmp_path: Path, capsys
+        self, tmp_path: Path, caplog
     ) -> None:
         """Test that log_ai_call doesn't crash if writing fails."""
         # Use an invalid path (file instead of directory)
@@ -210,9 +210,8 @@ class TestLogAICall:
                 schema={},
             )
 
-        # Check that a warning was printed
-        captured = capsys.readouterr()
-        assert "Warning: Failed to log AI call" in captured.out
+        # Check that a warning was logged
+        assert "Failed to log AI call" in caplog.text
 
     def test_log_ai_call_large_messages(self, tmp_path: Path) -> None:
         """Test log entry with large message content."""

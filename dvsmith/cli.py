@@ -326,7 +326,7 @@ class DVSmith:
                 selected_categories = [TaskCategory.STIMULUS, TaskCategory.COVERAGE_FUNC]
                 break
             else:
-                print(f"[WARNING] Unknown task type: {token}, skipping")
+                logger.warning(f"Unknown task type: {token}, skipping")
 
         if not selected_categories:
             selected_categories = [TaskCategory.STIMULUS]  # default
@@ -335,15 +335,15 @@ class DVSmith:
         smoke_tests = profile.get("grading", {}).get("smoke_tests", [])
         tasks = task_gen.generate_tasks(tasks_dir, smoke_tests=smoke_tests)
 
-        print(f"  Generated {len(tasks)} tasks")
+        logger.info(f"Generated {len(tasks)} tasks")
 
         # Step 3: Create backups directory with original tests
-        print("[dv-smith] Step 3: Backing up original tests...")
+        logger.info("Backing up original tests...")
         self._backup_tests(gym_dir, repo_path, analysis)
 
         # Step 4: Build container images (TODO - skip for now)
-        print("[dv-smith] Step 4: Building container images...")
-        print("  (Skipping - container build not yet implemented)")
+        logger.info("Building container images...")
+        logger.info("(Skipping - container build not yet implemented)")
 
         # Save gym metadata
         gym_metadata = {
@@ -360,7 +360,7 @@ class DVSmith:
 
         # Step 5: Verify gym integrity using Claude SDK
         if skip_verification:
-            print("[dv-smith] Step 5: Verifying gym integrity... [SKIPPED]")
+            logger.info("Verifying gym integrity... [SKIPPED]")
             validation = {
                 "compilation": True,  # Assume OK when skipped
                 "base_test_exists": True,
@@ -368,49 +368,49 @@ class DVSmith:
                 "missing_files": []
             }
         else:
-            print("[dv-smith] Step 5: Verifying gym integrity...")
+            logger.info("Verifying gym integrity...")
             validation = cleaner.verify_integrity(profile)
 
         if not validation['compilation']:
-            print("  ⚠️  WARNING: Testbench compilation failed!")
+            logger.warning("⚠️  WARNING: Testbench compilation failed!")
 
             # Show specific errors if available
             errors = validation.get('errors', [])
             if errors:
-                print("  Errors encountered:")
+                logger.error("Errors encountered:")
                 for error in errors[:5]:  # Limit to 5 errors
-                    print(f"    - {error}")
+                    logger.error(f"  - {error}")
             else:
-                print("    No specific errors reported by verification agent")
+                logger.error("  No specific errors reported by verification agent")
 
             # Show missing files if any
             if validation.get('missing_files'):
-                print(f"  Missing files: {', '.join(validation['missing_files'][:5])}")
+                logger.error(f"Missing files: {', '.join(validation['missing_files'][:5])}")
 
             # Show agent responses for debugging if no errors reported
             if not errors and validation.get('agent_responses'):
-                print("  Agent output (for debugging):")
+                logger.debug("Agent output (for debugging):")
                 for resp in validation['agent_responses'][:2]:
-                    print(f"    {resp[:150]}...")
+                    logger.debug(f"  {resp[:150]}...")
 
-            print("  This gym may not be functional. Check test directory structure.")
-            print("  You can try manual compilation: cd sim/cadence_sim && make compile")
+            logger.warning("This gym may not be functional. Check test directory structure.")
+            logger.info("You can try manual compilation: cd sim/cadence_sim && make compile")
         elif not validation['base_test_exists']:
-            print("  ⚠️  WARNING: Base test file not found!")
-            print("  Generated tasks may not be solvable without base test infrastructure.")
+            logger.warning("⚠️  WARNING: Base test file not found!")
+            logger.warning("Generated tasks may not be solvable without base test infrastructure.")
         else:
-            print("  ✓ Testbench structure validated")
-            print("  ✓ Base test infrastructure present")
+            logger.info("✓ Testbench structure validated")
+            logger.info("✓ Base test infrastructure present")
             if validation['compilation']:
-                print("  ✓ Compilation verified successful")
+                logger.info("✓ Compilation verified successful")
 
         # Step 6: Create HOWTO guide for agents
-        print("[dv-smith] Step 6: Creating HOWTO guide...")
+        logger.info("Creating HOWTO guide...")
         howto_path = cleaner.create_howto_guide(profile)
-        print(f"  Created {howto_path.name}")
+        logger.info(f"Created {howto_path.name}")
 
-        print(f"[dv-smith] Gym created: {gym_dir}")
-        print("[dv-smith] Build complete!")
+        logger.info(f"Gym created: {gym_dir}")
+        logger.info("Build complete!")
 
     def validate(self, name: str, simulator: Optional[str] = None) -> None:
         """Validate a gym (smoke tests pass, tasks unsolved).
@@ -419,17 +419,17 @@ class DVSmith:
             name: Name of the gym
             simulator: Simulator to use (default: first available)
         """
-        print(f"[dv-smith] Validating gym: {name}")
+        logger.info(f"Validating gym: {name}")
 
         gym_dir = self.gyms_dir / name
         if not gym_dir.exists():
-            print(f"[ERROR] Gym not found: {gym_dir}")
+            logger.error(f"Gym not found: {gym_dir}")
             sys.exit(1)
 
         # Load profile
         profile_path = self.profiles_dir / f"{name}.yaml"
         if not profile_path.exists():
-            print(f"[ERROR] Profile not found: {profile_path}")
+            logger.error(f"Profile not found: {profile_path}")
             sys.exit(1)
 
         with open(profile_path) as f:
@@ -444,23 +444,23 @@ class DVSmith:
             try:
                 selected_sim = Simulator(simulator)
             except ValueError:
-                print(f"[ERROR] Unknown simulator: {simulator}")
+                logger.error(f"Unknown simulator: {simulator}")
                 sys.exit(1)
 
         # Initialize validator
         try:
             validator = Validator(gym_dir, profile, selected_sim)
         except Exception as e:
-            print(f"[ERROR] Failed to initialize validator: {e}")
+            logger.error(f"Failed to initialize validator: {e}")
             sys.exit(1)
 
         # Run validation
         passed = validator.validate()
 
         if passed:
-            print("\n[dv-smith] ✓ Validation passed")
+            logger.info("\n✓ Validation passed")
         else:
-            print("\n[dv-smith] ✗ Validation failed")
+            logger.error("\n✗ Validation failed")
             sys.exit(1)
 
     def eval(self, task_path: str, patch_path: str,
@@ -473,7 +473,7 @@ class DVSmith:
             simulator: Simulator to use (default: first available in task)
             output: Output path for evaluation report (default: stdout)
         """
-        print("[dv-smith] Evaluating solution")
+        logger.info("Evaluating solution")
         print(f"  Task: {task_path}")
         print(f"  Patch: {patch_path}")
 

@@ -2,6 +2,19 @@
 
 import logging
 import os
+import sys
+
+
+class TqdmLoggingHandler(logging.Handler):
+    """Custom logging handler that works with tqdm progress bars."""
+    
+    def emit(self, record):
+        try:
+            from tqdm import tqdm
+            msg = self.format(record)
+            tqdm.write(msg, file=sys.stderr)
+        except Exception:
+            self.handleError(record)
 
 
 def setup_logging() -> logging.Logger:
@@ -14,13 +27,24 @@ def setup_logging() -> logging.Logger:
     debug_enabled = os.getenv("DVSMITH_DEBUG", "").lower() in ("1", "true", "yes")
     log_level = logging.DEBUG if debug_enabled else logging.INFO
     
-    # Configure root logger
-    logging.basicConfig(
-        level=log_level,
-        format='[%(levelname)s] %(message)s'
-    )
+    # Create root logger
+    logger = logging.getLogger("dvsmith")
+    logger.setLevel(log_level)
     
-    return logging.getLogger("dvsmith")
+    # Remove any existing handlers to avoid duplicates
+    logger.handlers.clear()
+    
+    # Add tqdm-compatible handler
+    handler = TqdmLoggingHandler()
+    handler.setLevel(log_level)
+    formatter = logging.Formatter('[%(levelname)s] %(message)s')
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
+    
+    # Prevent propagation to root logger
+    logger.propagate = False
+    
+    return logger
 
 
 def get_logger(name: str) -> logging.Logger:

@@ -12,6 +12,9 @@ from tqdm import tqdm
 from .ai_structured import query_with_pydantic_response
 from .ai_models import DirectoryInfo, FilesEnvelope, TestInfo, BuildInfo
 from .models import BuildSystem, RepoAnalysis, Simulator, UVMSequence, UVMTest
+from ..config import get_logger
+
+logger = get_logger(__name__)
 
 
 class AIRepoAnalyzer:
@@ -196,7 +199,7 @@ class AIRepoAnalyzer:
 
         # If we found exactly one test directory, use it directly (no need for AI to choose)
         if len(test_dir_candidates) == 1:
-            tqdm.write(f"[AI Analyzer] Found single test directory: {test_dir_candidates[0]['path']}")
+            logger.info(f"[AI Analyzer] Found single test directory: {test_dir_candidates[0]['path']}")
             return DirectoryInfo(
                 tests_dir=test_dir_candidates[0]['path'],
                 sequences_dir=None,
@@ -255,10 +258,10 @@ CRITICAL RULES:
             if result.tests_dir:
                 test_path = self.repo_root / result.tests_dir
                 if not test_path.exists():
-                    tqdm.write(f"[AI Analyzer] Warning: AI suggested non-existent path: {result.tests_dir}")
+                    logger.warning(f"[AI Analyzer] Warning: AI suggested non-existent path: {result.tests_dir}")
                     # Use first candidate we actually found
                     if test_dir_candidates:
-                        tqdm.write(f"[AI Analyzer] Using first discovered directory instead: {test_dir_candidates[0]['path']}")
+                        logger.info(f"[AI Analyzer] Using first discovered directory instead: {test_dir_candidates[0]['path']}")
                         result.tests_dir = test_dir_candidates[0]['path']
                     else:
                         result.tests_dir = None
@@ -266,10 +269,10 @@ CRITICAL RULES:
             return result
 
         except Exception as e:
-            tqdm.write(f"[AI Analyzer] Warning: Could not parse directory info: {e}")
+            logger.warning(f"[AI Analyzer] Warning: Could not parse directory info: {e}")
             # Fallback to first candidate if available
             if test_dir_candidates:
-                tqdm.write(f"[AI Analyzer] Using first discovered directory as fallback: {test_dir_candidates[0]['path']}")
+                logger.info(f"[AI Analyzer] Using first discovered directory as fallback: {test_dir_candidates[0]['path']}")
                 return DirectoryInfo(
                     tests_dir=test_dir_candidates[0]['path'],
                     sequences_dir=None,
@@ -324,7 +327,7 @@ CRITICAL RULES:
                 if test_info:
                     tests.append(test_info)
             except Exception as e:
-                tqdm.write(f"[AI Analyzer] Warning: Could not analyze {test_file.name}: {e}")
+                logger.warning(f"[AI Analyzer] Warning: Could not analyze {test_file.name}: {e}")
 
         return tests
 
@@ -382,7 +385,7 @@ Return format (STRICT):
             )
 
             file_paths = result.files
-            tqdm.write(f"[AI Analyzer] AI identified {len(file_paths)} test files")
+            logger.info(f"[AI Analyzer] AI identified {len(file_paths)} test files")
             # Don't print individual files to keep progress bar clean
 
             # Convert to Path objects
@@ -425,7 +428,7 @@ Return format (STRICT):
                 if full_path and full_path.exists():
                     paths.append(full_path)
                 else:
-                    tqdm.write(f"[AI Analyzer] Warning: File not found: {fpath}")
+                    logger.warning(f"[AI Analyzer] Warning: File not found: {fpath}")
 
             # If AI returned empty list or no valid files, raise error
             if not paths:
@@ -533,7 +536,7 @@ If this IS a valid UVM test class, extract:
             )
 
         except Exception as e:
-            tqdm.write(f"[AI Analyzer] ERROR: Failed to extract test from {file_path.name}: {e}")
+            logger.error(f"[AI Analyzer] ERROR: Failed to extract test from {file_path.name}: {e}")
             return None
 
     def _analyze_sequences(self, sequences_dir: Optional[str]) -> list[UVMSequence]:
@@ -730,7 +733,7 @@ Look for:
             }
 
         except Exception as e:
-            tqdm.write(f"[AI Analyzer] Warning: AI build detection failed, using regex fallback")
+            logger.warning(f"[AI Analyzer] Warning: AI build detection failed, using regex fallback")
             # Fallback to regex-only detection
             regex_simulators = [sim_map[s] for s in detected_sims if s in sim_map]
             return {"build_system": BuildSystem.MAKEFILE, "simulators": regex_simulators}

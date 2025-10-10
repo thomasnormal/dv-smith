@@ -1,20 +1,17 @@
 # DV-Smith: SystemVerilog/UVM Verification Gym Generator
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
-
 **DV-Smith** is a framework that automatically converts SystemVerilog/UVM testbenches into containerized verification tasks (DV gyms), enabling AI agents and automated tools to learn and improve hardware verification.
 
 Inspired by [SWE-smith](https://github.com/SWE-Smith/SWE-smith) and [SWE-Gym](https://github.com/SWE-Gym/SWE-Gym), DV-Smith brings the same containerized task paradigm to hardware verification.
 
-## 🎯 What is DV-Smith?
+## 🎯 What is a DV-Smith?
 
 DV-Smith is a **DV gym generator** that:
 
-- 📊 **Analyzes** UVM repositories using AI to discover tests, sequences, and covergroups
-- 🏗️ **Builds** isolated verification tasks from existing testbenches
-- ⚖️ **Evaluates** solutions based on functional coverage, code coverage, and simulation health
-- 🔄 **Supports** multiple simulators: Xcelium, Questa/ModelSim, VCS, Verilator
+- **Analyzes** UVM repositories using AI to discover tests, sequences, and covergroups
+- **Builds** isolated verification tasks from existing testbenches
+- **Evaluates** solutions based on functional coverage, code coverage, and simulation health
+- **Supports** multiple simulators: Xcelium, Questa/ModelSim, VCS, Verilator
 
 ### Key Features
 
@@ -35,7 +32,6 @@ DV-Smith is a **DV gym generator** that:
   - Cadence Xcelium
   - Mentor Questa/ModelSim
   - Synopsys VCS
-  - (Verilator support planned)
 
 ### Installation
 
@@ -57,21 +53,18 @@ pip install -e .
 echo "ANTHROPIC_API_KEY=your-key-here" > .env
 ```
 
-**Important Notes**:
-- The `ANTHROPIC_API_KEY` is **required** for AI-powered repository analysis and task generation
-- Get your API key from: https://console.anthropic.com/settings/keys
-- Uses Claude 3.5 Sonnet for intelligent code analysis
-- Dependencies (`anthropic`, `claude-agent-sdk`, `python-dotenv`) are automatically installed
-- If the `dvsmith` command is not found, use `python -m dvsmith.cli` instead
 
 ### Create Your First DV Gym
 
 ```bash
 # 1. Ingest a UVM repository
-dvsmith ingest https://github.com/mbits-mirafra/apb_avip --name apb_avip
+dvsmith ingest https://github.com/mbits-mirafra/apb_avip
 
-# 2. Build the gym
+# 2. Build the gym (single simulator)
 dvsmith build apb_avip --sim xcelium
+
+# Or build with multiple simulators
+dvsmith build apb_avip --sim xcelium,questa
 
 # 3. Explore tasks
 ls dvsmith_workspace/gyms/apb_avip/tasks/
@@ -93,6 +86,24 @@ dvsmith eval \
 
 DV-Smith provides full transparency into AI operations with built-in logging and debugging tools.
 
+### Debug Logging
+
+Enable verbose debug output to troubleshoot issues or understand what's happening:
+
+```bash
+export DVSMITH_DEBUG=1
+dvsmith build apb_avip --sim xcelium
+```
+
+This will show:
+- Detailed compilation commands and simulator invocations
+- File operations (copying, removing, etc.)
+- AI query details and responses
+- Coverage extraction steps
+- Infrastructure file analysis
+
+Debug output uses the standard Python logging system and is enabled only when `DVSMITH_DEBUG` is set to `1`, `true`, or `yes`.
+
 ### View AI Call Logs
 
 All AI interactions are automatically logged to `~/.dvsmith/ai_calls.jsonl`:
@@ -108,117 +119,11 @@ dvsmith ai-logs --tail 20
 dvsmith ai-logs --tail 5 --full
 ```
 
-**Log Information:**
-- Timestamp of each AI call
-- Response model used (TestInfo, DirectoryInfo, BuildInfo, etc.)
-- Call duration in milliseconds
-- Success/error status
-- Full prompts and responses (with --full flag)
-
-### AI File Identification
-
-During ingestion, DV-Smith displays exactly which files the AI identifies:
-
-```
-[AI Analyzer] AI identified 10 test files:
-  - dvsmith_workspace/clones/apb_avip/src/hvl_top/test/apb_16b_read_test.sv
-  - dvsmith_workspace/clones/apb_avip/src/hvl_top/test/apb_16b_write_test.sv
-  - dvsmith_workspace/clones/apb_avip/src/hvl_top/test/apb_24b_write_test.sv
-  ...
-```
-
-This helps you understand and verify the AI's analysis decisions.
-
 ## 📚 Documentation
 
 - **[Getting Started](docs/tutorials/01_getting_started.md)**: Installation, first gym, basic workflows
 - **[Writing Agents](docs/tutorials/02_writing_agents.md)**: Create agents that solve verification tasks
 - **[Understanding Evaluation](docs/tutorials/03_evaluation.md)**: How solutions are scored
-
-## 🏗️ Architecture
-
-```
-DV-Smith Pipeline:
-┌─────────────┐      ┌──────────────┐      ┌──────────────┐
-│   UVM Repo  │─────▶│  AI Analyzer │─────▶│   Profile    │
-└─────────────┘      └──────────────┘      └──────────────┘
-                                                    │
-                                                    ▼
-┌─────────────┐      ┌──────────────┐      ┌──────────────┐
-│  Evaluation │◀─────│    Agent     │◀─────│   DV Gym     │
-└─────────────┘      └──────────────┘      └──────────────┘
-```
-
-### Components
-
-**Core:**
-- `dvsmith/core/ai_analyzer.py` - Claude-powered repository analysis (Claude 3.5 Sonnet)
-- `dvsmith/core/task_generator.py` - Claude-powered task generation (Claude 3.5 Sonnet)
-- `dvsmith/core/gym_cleaner.py` - Intelligent gym cleaning (Claude Code SDK)
-- `dvsmith/cli.py` - Command-line interface
-
-**Simulator Adapters:**
-- `dvsmith/adapters/sim/xcelium.py` - Cadence Xcelium support ✅
-- `dvsmith/adapters/sim/questa.py` - Mentor Questa/ModelSim support ✅
-- `dvsmith/adapters/sim/base.py` - Base adapter interface
-
-**Coverage Parsers:**
-- `dvsmith/adapters/cov/xcelium_parser.py` - Xcelium IMC parser ✅
-- `dvsmith/adapters/cov/questa_parser.py` - Questa vcover parser ✅
-
-**Evaluation:**
-- `dvsmith/harness/evaluator.py` - Solution evaluation and scoring
-- `dvsmith/harness/validator.py` - Gym validation
-
-## 🎯 Example Use Cases
-
-### 1. Benchmark LLM Agents on Hardware Verification
-
-```python
-from dvsmith.cli import DVSmith
-from my_llm_agent import LLMVerificationAgent
-
-# Create gym from your UVM testbench
-dvsmith = DVSmith()
-dvsmith.ingest("path/to/your/uvm/repo", name="my_bench")
-dvsmith.build("my_bench")
-
-# Evaluate LLM agent on all tasks
-agent = LLMVerificationAgent(model="gpt-4")
-results = []
-
-for task_file in Path("dvsmith_workspace/gyms/my_bench/tasks").glob("*.md"):
-    solution = agent.solve(task_file)
-    result = dvsmith.eval(task=task_file, patch=solution)
-    results.append(result)
-
-print(f"Pass rate: {sum(r.passed for r in results) / len(results):.1%}")
-```
-
-### 2. Automated Test Generation Research
-
-```bash
-# Generate training dataset
-for repo in repo_list.txt; do
-    dvsmith ingest "$repo" --name $(basename "$repo")
-    dvsmith build $(basename "$repo")
-done
-
-# Train your model on generated tasks
-python train_model.py --data dvsmith_workspace/gyms/*/tasks/*.md
-```
-
-### 3. Continuous Verification Testing
-
-```bash
-# CI/CD integration
-dvsmith ingest . --name ci_gym
-dvsmith build ci_gym --sim xcelium
-dvsmith validate ci_gym  # Ensure smoke tests pass
-
-# Evaluate changes
-dvsmith eval --task gym/tasks/task_001.md --patch pr_changes.patch
-```
 
 ## 📊 Benchmarks
 
@@ -231,9 +136,9 @@ DV-Smith has been tested on public UVM AVIPs:
 | [I3C AVIP](https://github.com/mbits-mirafra/i3c_avip) | 8 | 6 | 2 | questa, vcs, xcelium | ✅ |
 | [SPI AVIP](https://github.com/mbits-mirafra/spi_avip) | TBD | TBD | TBD | questa, vcs, xcelium | ⚠️ |
 
-*Note: SPI AVIP gym build has known issues with AI hint generation.*
-
 ## 🧪 Testing
+
+For debugging, set `DVSMITH_DEBUG=1`
 
 ```bash
 # Run all tests
@@ -247,15 +152,6 @@ pytest tests/test_integration.py -v             # Integration tests
 # Run with coverage
 pytest tests/ --cov=dvsmith --cov-report=html
 ```
-
-**Test Results:**
-- ✅ 32/32 tests passing (100%)
-- ✅ Unit tests: models, coverage parsers
-- ✅ Integration tests: AI analyzer, task generator, simulators
-- ✅ Xcelium adapter with summary fallback fully tested
-- ✅ Coverage parsers validated (Questa + Xcelium)
-
-## 🔧 Configuration
 
 ### Workspace Structure
 
@@ -299,106 +195,3 @@ The HOWTO.md guide is automatically generated for each gym and includes:
 - Package file editing requirements (critical for test registration)
 - Common pitfalls and troubleshooting
 
-### Profile Configuration
-
-Profiles are automatically generated but can be customized:
-
-```yaml
-name: apb_avip
-repo_url: dvsmith_workspace/clones/apb_avip
-description: UVM testbench for apb_avip
-simulators:
-  - questa
-  - vcs
-  - xcelium
-
-paths:
-  root: .
-  tests: src/hvl_top/test
-  sequences: src/hvl_top/test/sequences
-  env: src/hvl_top/env
-
-build:
-  xcelium:
-    work_dir: sim/cadence_sim
-    compile_cmd: make -C sim/cadence_sim compile
-    run_cmd: make -C sim/cadence_sim simulate test={test} SEED={seed}
-
-coverage:
-  questa:
-    report_cmd: vcover report -details -output {output} {ucdb}
-    functional_covergroups:
-      - apb_master_coverage.apb_master_covergroup
-      - apb_slave_coverage.apb_slave_covergroup
-
-grading:
-  smoke_tests:
-    - apb_base_test
-  weights:
-    functional_coverage: 0.6
-    code_coverage: 0.3
-    health: 0.1
-  thresholds:
-    functional:
-      min_pct: 80.0
-      strategy: any_of
-    code:
-      statements_min_pct: 70.0
-      branches_min_pct: 60.0
-      toggles_min_pct: 50.0
-    health:
-      max_uvm_errors: 0
-      max_uvm_fatals: 0
-      max_scoreboard_errors: 0
-      all_assertions_pass: true
-```
-
-## 🤝 Contributing
-
-We welcome contributions! Areas of interest:
-
-- 🔌 New simulator adapters (VCS, Verilator, DSIM)
-- 🤖 Sample agents (LLM-based, template-based, search-based)
-- 📊 Additional benchmarks
-- 🧪 Test coverage improvements
-- 📚 Documentation and tutorials
-
-## 📄 License
-
-MIT License - see [LICENSE](LICENSE) file for details.
-
-## 🙏 Acknowledgments
-
-- Inspired by [SWE-smith](https://github.com/SWE-Smith/SWE-smith) and [SWE-Gym](https://github.com/SWE-Gym/SWE-Gym)
-- Test repositories from [mbits-mirafra](https://github.com/mbits-mirafra)
-- UVM methodology from Accellera
-
-## 📞 Support
-
-- 📖 [Documentation](docs/)
-- 🐛 [Issue Tracker](https://github.com/yourusername/dv-smith/issues)
-- 💬 [Discussions](https://github.com/yourusername/dv-smith/discussions)
-
-## 🗺️ Roadmap
-
-- [x] Core framework and CLI
-- [x] AI-powered repository analysis
-- [x] Questa adapter + coverage parser
-- [x] Xcelium adapter + coverage parser
-- [x] Task generator with markdown format
-- [x] Validation and evaluation harnesses
-- [x] Comprehensive unit and integration tests
-- [x] Claude SDK agent implementation (autonomous code generation)
-- [x] Complete documentation and tutorials
-- [x] AI transparency and debugging (call logging, file identification display)
-- [ ] VCS simulator adapter
-- [ ] Verilator adapter with coverage
-- [ ] Docker containerization for reproducibility
-- [ ] Web UI for gym exploration
-- [ ] Integration with popular LLM frameworks
-- [ ] Benchmark leaderboard
-- [ ] Support for SystemC/TLM testbenches
-
----
-
-**Built for the hardware verification community by the hardware verification community.**
