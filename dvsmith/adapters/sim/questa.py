@@ -5,9 +5,12 @@ import subprocess
 from pathlib import Path
 from typing import Any, Optional
 
+from ...config import get_logger
 from ...core.models import CoverageReport, Simulator
 from ..cov.questa_parser import QuestaCovrageParser
 from .base import SimulationResult, SimulatorAdapter, SimulatorConfig
+
+logger = get_logger(__name__)
 
 
 class QuestaAdapter(SimulatorAdapter):
@@ -76,8 +79,8 @@ class QuestaAdapter(SimulatorAdapter):
             for key, value in extra_args.items():
                 compile_cmd = compile_cmd.replace(f"{{{key}}}", value)
 
-        print(f"[Questa] Compiling in {work_dir}")
-        print(f"[Questa] Command: {compile_cmd}")
+        logger.info(f"Compiling in {work_dir}")
+        logger.debug(f"Command: {compile_cmd}")
 
         try:
             result = subprocess.run(
@@ -93,18 +96,18 @@ class QuestaAdapter(SimulatorAdapter):
             compile_log.write_text(result.stdout + result.stderr)
 
             if result.returncode != 0:
-                print(f"[Questa] Compilation failed. See {compile_log}")
-                print(result.stderr)
+                logger.error(f"Compilation failed. See {compile_log}")
+                logger.debug(result.stderr)
                 return False
 
-            print("[Questa] Compilation successful")
+            logger.info("Compilation successful")
             return True
 
         except subprocess.TimeoutExpired:
-            print("[Questa] Compilation timed out")
+            logger.error("Compilation timed out")
             return False
         except Exception as e:
-            print(f"[Questa] Compilation error: {e}")
+            logger.error(f"Compilation error: {e}")
             return False
 
     def run_test(self, sim_config: SimulatorConfig) -> SimulationResult:
@@ -145,8 +148,8 @@ quit
 
         log_file = sim_config.work_dir / f"{sim_config.test_name}.log"
 
-        print(f"[Questa] Running test: {sim_config.test_name}")
-        print(f"[Questa] Command: {run_cmd}")
+        logger.info(f"Running test: {sim_config.test_name}")
+        logger.debug(f"Command: {run_cmd}")
 
         import time
         start_time = time.time()
@@ -216,7 +219,7 @@ quit
             Normalized CoverageReport
         """
         if not sim_result.coverage_db_path or not sim_result.coverage_db_path.exists():
-            print("[Questa] No coverage database found")
+            logger.warning("No coverage database found")
             return CoverageReport(simulator=Simulator.QUESTA)
 
         # Generate text report from UCDB
@@ -233,14 +236,14 @@ quit
             )
 
             if result.returncode != 0:
-                print(f"[Questa] Coverage report generation failed: {result.stderr}")
+                logger.error(f"Coverage report generation failed: {result.stderr}")
                 return CoverageReport(simulator=Simulator.QUESTA)
 
             # Parse the report
             return self.parser.parse(report_file, sim_result.log_path)
 
         except Exception as e:
-            print(f"[Questa] Coverage extraction error: {e}")
+            logger.error(f"Coverage extraction error: {e}")
             return CoverageReport(simulator=Simulator.QUESTA)
 
     def merge_coverage(self, coverage_dbs: list[Path], output_path: Path) -> Path:
@@ -256,7 +259,7 @@ quit
         db_list = " ".join(str(db) for db in coverage_dbs)
         merge_cmd = f"vcover merge -output {output_path} {db_list}"
 
-        print(f"[Questa] Merging {len(coverage_dbs)} coverage databases")
+        logger.info(f"Merging {len(coverage_dbs)} coverage databases")
 
         try:
             result = subprocess.run(

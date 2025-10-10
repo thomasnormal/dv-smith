@@ -3,7 +3,10 @@
 import re
 from pathlib import Path
 
+from ...config import get_logger
 from ...core.models import HealthMetrics
+
+logger = get_logger(__name__)
 
 
 class UVMLogParser:
@@ -44,7 +47,7 @@ class UVMLogParser:
             metrics.compilation_errors = self._count_compilation_errors(content)
 
         except Exception as e:
-            print(f"[UVMLogParser] Error parsing log: {e}")
+            logger.error(f"Error parsing log: {e}")
 
         return metrics
 
@@ -168,6 +171,6 @@ class UVMLogParser:
                 counters[name] = value
 
         except Exception as e:
-            print(f"[UVMLogParser] Error extracting counters: {e}")
+            logger.error(f"Error extracting counters: {e}")
 
         return counters

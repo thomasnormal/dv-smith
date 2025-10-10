@@ -4,6 +4,7 @@ import re
 from pathlib import Path
 from typing import Optional
 
+from ...config import get_logger
 from ...core.models import (
     CodeCoverage,
     CoverageBin,
@@ -12,6 +13,8 @@ from ...core.models import (
     Simulator,
 )
 from ..parse.uvm_log import UVMLogParser
+
+logger = get_logger(__name__)
 
 
 class QuestaCovrageParser:
@@ -50,7 +53,7 @@ class QuestaCovrageParser:
                 report.health = self.log_parser.parse_health(log_path)
 
         except Exception as e:
-            print(f"[QuestaParser] Error parsing coverage: {e}")
+            logger.error(f"Error parsing coverage: {e}")
 
         return report
 

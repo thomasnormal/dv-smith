@@ -2,10 +2,14 @@
 
 from pathlib import Path
 from typing import Any, Optional
+import tqdm
 
+from ..config import get_logger
 # Import adapters to trigger registration
 from ..adapters.sim.base import SimulatorAdapter, SimulatorConfig, SimulatorRegistry
 from ..core.models import Simulator
+
+logger = get_logger(__name__)
 
 
 class Validator:
@@ -38,7 +42,7 @@ class Validator:
         Returns:
             True if all checks pass, False otherwise
         """
-        print("[Validator] Starting validation...")
+        logger.info("Starting validation...")
 
         checks = [
             ("Directory structure", self._check_directory_structure),
@@ -50,22 +54,22 @@ class Validator:
 
         all_passed = True
         for check_name, check_fn in checks:
-            print(f"[Validator] Checking: {check_name}...")
+            logger.info(f"Checking: {check_name}...")
             try:
                 passed = check_fn()
                 if passed:
-                    print(f"[Validator]   ✓ {check_name} passed")
+                    logger.info(f"  ✓ {check_name} passed")
                 else:
-                    print(f"[Validator]   ✗ {check_name} failed")
+                    logger.error(f"  ✗ {check_name} failed")
                     all_passed = False
             except Exception as e:
-                print(f"[Validator]   ✗ {check_name} error: {e}")
+                logger.error(f"  ✗ {check_name} error: {e}")
                 all_passed = False
 
         if all_passed:
-            print("[Validator] ✓ All validation checks passed")
+            logger.info("✓ All validation checks passed")
         else:
-            print("[Validator] ✗ Validation failed")
+            logger.error("✗ Validation failed")
 
         return all_passed
 
@@ -102,7 +106,7 @@ class Validator:
         for dir_name in required_dirs:
             dir_path = self.gym_dir / dir_name
             if not dir_path.exists():
-                print(f"[Validator]     Missing directory: {dir_path}")
+                logger.error(f"    Missing directory: {dir_path}")
                 return False
 
         return True
@@ -113,13 +117,13 @@ class Validator:
 
         for key in required_keys:
             if key not in self.profile:
-                print(f"[Validator]     Missing profile key: {key}")
+                logger.error(f"    Missing profile key: {key}")
                 return False
 
         # Check simulator configs
         for sim_name in self.profile["simulators"]:
             if sim_name not in self.profile.get("build", {}):
-                print(f"[Validator]     Missing build config for: {sim_name}")
+                logger.error(f"    Missing build config for: {sim_name}")
                 return False
 
         return True
@@ -127,7 +131,7 @@ class Validator:
     def _check_simulator_setup(self) -> bool:
         """Verify simulator is available and can be initialized."""
         if not self.simulator:
-            print("[Validator]     No simulators available - skipping simulator checks")
+            logger.info("    No simulators available - skipping simulator checks")
             return True
 
         try:
@@ -139,13 +143,13 @@ class Validator:
             )
             return True
         except Exception as e:
-            print(f"[Validator]     Simulator setup error: {e}")
+            logger.error(f"    Simulator setup error: {e}")
             return False
 
     def _check_smoke_tests(self) -> bool:
         """Verify smoke tests compile and run successfully."""
         if not self.simulator:
-            print("[Validator]     No simulators available - skipping smoke tests")
+            logger.info("    No simulators available - skipping smoke tests")
             return True
 
         if not self.adapter:
@@ -153,21 +157,21 @@ class Validator:
 
         smoke_tests = self.profile.get("grading", {}).get("smoke_tests", [])
         if not smoke_tests:
-            print("[Validator]     No smoke tests defined")
+            logger.info("    No smoke tests defined")
             return True
 
-        print(f"[Validator]     Running {len(smoke_tests)} smoke tests...")
+        logger.info(f"    Running {len(smoke_tests)} smoke tests...")
 
         # Compile once
         work_dir = self.gym_dir / "work" / "validation"
         work_dir.mkdir(exist_ok=True, parents=True)
 
         if not self.adapter.compile(work_dir):
-            print("[Validator]     Compilation failed")
+            logger.error("    Compilation failed")
             return False
 
         # Run each smoke test
-        for test_name in smoke_tests:
+        for test_name in tqdm.tqdm(smoke_tests):
             config = SimulatorConfig(
                 work_dir=work_dir,
                 test_name=test_name,
@@ -178,11 +182,11 @@ class Validator:
             result = self.adapter.run_test(config)
 
             if not result.success:
-                print(f"[Validator]     Smoke test failed: {test_name}")
-                print(f"[Validator]     Log: {result.log_path}")
+                logger.error(f"    Smoke test failed: {test_name}")
+                logger.error(f"    Log: {result.log_path}")
                 return False
 
-            print(f"[Validator]       ✓ {test_name}")
+            logger.info(f"      ✓ {test_name}")
 
         return True
 
@@ -197,13 +201,13 @@ class Validator:
         task_files = list(tasks_dir.glob("task_*.md"))
 
         if not task_files:
-            print("[Validator]     No task files found")
+            logger.error("    No task files found")
             return False
 
         # Sample up to 3 tasks for validation
         sample_tasks = task_files[:min(3, len(task_files))]
 
-        print(f"[Validator]     Checking {len(sample_tasks)} sample tasks...")
+        logger.info(f"    Checking {len(sample_tasks)} sample tasks...")
 
         for task_file in sample_tasks:
             try:
@@ -213,20 +217,20 @@ class Validator:
                 # For now, just check file is readable and non-empty
                 content = task_file.read_text()
                 if len(content) < 100:
-                    print(f"[Validator]     Task file too short: {task_file}")
+                    logger.error(f"    Task file too short: {task_file}")
                     return False
 
                 # Check for required sections
                 required_sections = ["Goal", "Acceptance Criteria"]
                 for section in required_sections:
                     if section not in content:
-                        print(f"[Validator]     Missing section '{section}': {task_file}")
+                        logger.error(f"    Missing section '{section}': {task_file}")
                         return False
 
-                print(f"[Validator]       ✓ {task_name}")
+                logger.info(f"      ✓ {task_name}")
 
             except Exception as e:
-                print(f"[Validator]     Error checking task {task_file}: {e}")
+                logger.error(f"    Error checking task {task_file}: {e}")
                 return False
 
         return True

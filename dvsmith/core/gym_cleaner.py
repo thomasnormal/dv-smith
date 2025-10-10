@@ -7,7 +7,29 @@ from typing import Any
 from claude_agent_sdk import query, ClaudeAgentOptions, AssistantMessage
 from pydantic import BaseModel, Field
 
+from ..config import get_logger
 from .ai_structured import query_with_pydantic_response
+
+logger = get_logger(__name__)
+
+
+class PackageCleanupResult(BaseModel):
+    """Result of package file cleanup."""
+    modified_files: list[str] = Field(
+        default_factory=list,
+        description="List of package files that were modified"
+    )
+    removed_includes: list[str] = Field(
+        default_factory=list,
+        description="List of include statements that were removed"
+    )
+    success: bool = Field(
+        description="True if cleanup completed successfully"
+    )
+    notes: str = Field(
+        default="",
+        description="Any notes or warnings about the cleanup"
+    )
 
 
 class ValidationResult(BaseModel):
@@ -73,17 +95,17 @@ class GymCleaner:
                 files_to_remove.append(test_file)
 
         if files_to_keep_pre:
-            print(f"[GymCleaner] Pre-filtered {len(files_to_keep_pre)} infrastructure files")
+            logger.info(f"Pre-filtered {len(files_to_keep_pre)} infrastructure files")
 
         test_dir = self.gym_dir / "src/hvl_top/test"
 
         if not test_dir.exists():
-            print(f"[GymCleaner] Test directory not found: {test_dir}")
+            logger.warning(f"Test directory not found: {test_dir}")
             return {"keep": files_to_keep_pre, "remove": [str(f) for f in files_to_remove]}
 
         # Only analyze remaining files (excluding pre-filtered infrastructure)
         if not files_to_remove:
-            print("[GymCleaner] All test files are infrastructure, nothing to remove")
+            logger.info("All test files are infrastructure, nothing to remove")
             return {"keep": files_to_keep_pre, "remove": []}
 
         task_files_str = "\n".join(f"- {f.name}" for f in files_to_remove)
@@ -113,15 +135,15 @@ Explore the directory structure and return the list of absolute file paths to ke
             )
             files_to_keep = result.files_to_keep
         except Exception as e:
-            print(f"[GymCleaner] Warning: SDK query failed: {e}")
-            print("[GymCleaner] Falling back to heuristic patterns...")
+            logger.warning(f"SDK query failed: {e}")
+            logger.info("Falling back to heuristic patterns...")
             # Fallback: use simple patterns
             if test_dir.exists():
                 for pattern in ["*_pkg.sv", "*_pkg.svh", "sequences/**/*.sv", "sequences/**/*.svh"]:
                     found = [str(f) for f in test_dir.glob(pattern)]
                     files_to_keep.extend(found)
                     if found:
-                        print(f"  Found {len(found)} files matching '{pattern}'")
+                        logger.info(f"Found {len(found)} files matching '{pattern}'")
 
         # Merge pre-filtered with SDK/heuristic results
         all_keep = list(set(files_to_keep_pre + files_to_keep))
@@ -153,7 +175,7 @@ Explore the directory structure and return the list of absolute file paths to ke
         base_test = smoke_tests[0] if smoke_tests else "base_test"
 
         if not simulators:
-            print("[GymCleaner] No simulators configured, skipping validation")
+            logger.info("No simulators configured, skipping validation")
             return {
                 "compilation": False,
                 "base_test_exists": False,
@@ -161,31 +183,51 @@ Explore the directory structure and return the list of absolute file paths to ke
                 "errors": ["No simulators configured"]
             }
 
-        # Find an available simulator directory
+        # Find an available simulator directory and check if tools are installed
         sim_tool = None
+        sim_tool_dir = None
         for sim in simulators:
-            sim_tool_dir = sim_dir / f"{sim}_sim"
-            if not sim_tool_dir.exists():
+            candidate_dir = sim_dir / f"{sim}_sim"
+            if not candidate_dir.exists():
                 # Try alternative naming
                 if sim == "xcelium":
-                    sim_tool_dir = sim_dir / "cadence_sim"
+                    candidate_dir = sim_dir / "cadence_sim"
                 elif sim == "questa":
-                    sim_tool_dir = sim_dir / "questa_sim"
+                    candidate_dir = sim_dir / "questa_sim"
                 elif sim == "vcs":
-                    sim_tool_dir = sim_dir / "synopsys_sim"
+                    candidate_dir = sim_dir / "synopsys_sim"
 
-            if sim_tool_dir.exists():
-                sim_tool = sim
-                break
+            if candidate_dir.exists():
+                # Check if simulator tools are actually available
+                import subprocess
+                tool_check = None
+                if sim == "xcelium":
+                    tool_check = "xrun"
+                elif sim == "questa":
+                    tool_check = "vsim"
+                elif sim == "vcs":
+                    tool_check = "vcs"
+                
+                if tool_check:
+                    try:
+                        result = subprocess.run(["which", tool_check], capture_output=True, timeout=5)
+                        if result.returncode == 0:
+                            sim_tool = sim
+                            sim_tool_dir = candidate_dir
+                            break
+                    except:
+                        pass
 
         if not sim_tool:
-            print(f"[GymCleaner] No simulator directories found in {sim_dir}")
+            logger.warning(f"No available simulator tools found in {sim_dir}")
             return {
                 "compilation": False,
                 "base_test_exists": False,
                 "smoke_test_passed": False,
-                "errors": ["No simulator directories found"]
+                "errors": ["No available simulator tools found (check PATH)"]
             }
+        
+        logger.info(f"Using {sim_tool} for validation at {sim_tool_dir}")
 
         prompt = f"""Verify this UVM testbench is properly set up for DV-Smith gym.
 
@@ -223,7 +265,7 @@ Analyze the testbench and return your findings.
                 "errors": result.errors
             }
         except Exception as e:
-            print(f"[GymCleaner] Warning: Validation failed: {e}")
+            logger.warning(f"Validation failed: {e}")
             return {
                 "compilation": False,
                 "base_test_exists": False,
@@ -254,56 +296,48 @@ Analyze the testbench and return your findings.
         """
         test_dir = self.gym_dir / "src/hvl_top/test"
         if not test_dir.exists():
-            print(f"[GymCleaner] Test directory not found: {test_dir}")
+            logger.warning(f"Test directory not found: {test_dir}")
             return {"modified_files": [], "errors": ["Test directory not found"]}
 
         removed_names_str = "\n".join(f"- {name}" for name in removed_test_names)
 
-        prompt = f"""Clean up the test package file by removing include statements for removed tests.
+        prompt = f"""Remove include statements for deleted test files from the test package file.
 
-**Task:** Find the test package file in {test_dir} (usually named *_pkg.sv or *_pkg.svh)
+**Test directory:** {test_dir}
 
 **Removed Test Files:**
 {removed_names_str}
 
-**What to do:**
-1. Read the package file
-2. Find all `include statements for the removed test files
-3. Comment out or remove those include statements (keep base_test includes!)
-4. Add a comment like "// REMOVED by gym builder:" before each removed include for reference
-5. Save the modified file
+**Your task:**
+1. Find the test package file (usually named *_pkg.sv or *_pkg.svh)
+2. Remove all `include statements that reference the removed test files listed above
+3. DO NOT remove base tests or infrastructure files
+4. ONLY remove includes that exactly match the removed test filenames
 
-**Important:**
-- DO NOT remove includes for base tests or infrastructure files
-- ONLY remove includes that match the removed test filenames listed above
-- Keep the package structure intact
+**Example:**
+If removed file is "apb_8b_write_test.sv", remove:
+`include "apb_8b_write_test.sv"
 
-Use Read and Edit tools to complete this task.
+Use the edit_file tool to make the changes. Return the list of modified files.
 """
-
-        options = ClaudeAgentOptions(
-            allowed_tools=["Read", "Edit", "Glob"],
-            cwd=str(self.gym_dir),
-            permission_mode="acceptEdits",  # Allow file modifications
-            max_turns=8
-        )
 
         modified_files = []
         errors = []
         try:
-            async for message in query(prompt=prompt, options=options):
-                if isinstance(message, AssistantMessage):
-                    # Agent completed the task
-                    pass
-
-            # Verify package file was modified by checking if it exists
-            pkg_files = list(test_dir.glob("*_pkg.sv")) + list(test_dir.glob("*_pkg.svh"))
-            if pkg_files:
-                modified_files = [str(f) for f in pkg_files]
+            result = await query_with_pydantic_response(
+                prompt=prompt,
+                response_model=PackageCleanupResult,
+                system_prompt="You are an expert in UVM package file structure and include management.",
+                cwd=str(self.gym_dir)
+            )
+            
+            modified_files = result.modified_files
+            if not result.success and result.notes:
+                errors.append(result.notes)
 
         except Exception as e:
             error_msg = f"SDK package cleanup failed: {e}"
-            print(f"[GymCleaner] {error_msg}")
+            logger.error(error_msg)
             errors.append(error_msg)
 
         return {
@@ -446,7 +480,7 @@ This is the file you must edit to add your test!
         with open(howto_path, 'w') as f:
             f.write(howto_content)
 
-        print(f"[GymCleaner] Created {howto_path}")
+        logger.info(f"Created {howto_path}")
         return howto_path
 
 

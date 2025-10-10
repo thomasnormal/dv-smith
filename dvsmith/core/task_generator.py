@@ -7,8 +7,13 @@ import re
 from pathlib import Path
 from typing import Any, Optional
 
+from tqdm import tqdm
+
+from ..config import get_logger
 from .ai_structured import query_with_pydantic_response
 from .ai_models import CompleteTaskMetadata
+
+logger = get_logger(__name__)
 from .models import (
     AcceptanceCriteria,
     RepoAnalysis,
@@ -74,33 +79,36 @@ class TaskGenerator:
             tests_to_generate.append(test)
 
         if not tests_to_generate:
-            print("[TaskGen] No tasks to generate")
+            logger.info("No tasks to generate")
             return []
 
-        print(f"[TaskGen] Generating {len(tests_to_generate)} tasks in parallel...")
+        logger.info(f"Generating {len(tests_to_generate)} tasks in parallel...")
 
         # Generate all tasks in parallel (with batching for rate limiting)
         BATCH_SIZE = 5  # Max concurrent AI calls
         all_tasks = []
         
-        for batch_start in range(0, len(tests_to_generate), BATCH_SIZE):
-            batch = tests_to_generate[batch_start:batch_start + BATCH_SIZE]
-            
-            # Generate tasks in parallel for this batch
-            batch_tasks = await asyncio.gather(*[
-                self._create_task_for_test_async(test, batch_start + i + 1)
-                for i, test in enumerate(batch)
-            ])
-            
-            all_tasks.extend(batch_tasks)
+        total_batches = (len(tests_to_generate) + BATCH_SIZE - 1) // BATCH_SIZE
+        with tqdm(total=len(tests_to_generate), desc="Generating tasks", unit="task") as pbar:
+            for batch_start in range(0, len(tests_to_generate), BATCH_SIZE):
+                batch = tests_to_generate[batch_start:batch_start + BATCH_SIZE]
+                
+                # Generate tasks in parallel for this batch
+                batch_tasks = await asyncio.gather(*[
+                    self._create_task_for_test_async(test, batch_start + i + 1)
+                    for i, test in enumerate(batch)
+                ])
+                
+                all_tasks.extend(batch_tasks)
+                pbar.update(len(batch))
 
         # Write all task files
         for task_id, task in enumerate(all_tasks, 1):
             task_file = output_dir / f"task_{task_id:03d}_{task.id}.md"
             task_file.write_text(task.to_markdown())
-            print(f"[TaskGen] Generated: {task_file.name}")
+            logger.info(f"Generated: {task_file.name}")
 
-        print(f"[TaskGen] Generated {len(all_tasks)} tasks")
+        logger.info(f"Generated {len(all_tasks)} tasks")
         return all_tasks
 
     def _create_task_for_test(self, test: UVMTest, task_id: int) -> TaskSpec:
@@ -380,6 +388,6 @@ Analyze the test thoroughly and provide comprehensive, high-quality metadata.
                 sim = Simulator(name)
                 simulators.append(sim)
             except ValueError:
-                print(f"[TaskGen] Warning: Unknown simulator '{name}'")
+                logger.warning(f"Unknown simulator '{name}'")
 
         return simulators

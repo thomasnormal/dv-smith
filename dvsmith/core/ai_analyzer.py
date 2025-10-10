@@ -7,6 +7,8 @@ import subprocess
 from pathlib import Path
 from typing import Any, Optional
 
+from tqdm import tqdm
+
 from .ai_structured import query_with_pydantic_response
 from .ai_models import DirectoryInfo, FilesEnvelope, TestInfo, BuildInfo
 from .models import BuildSystem, RepoAnalysis, Simulator, UVMSequence, UVMTest
@@ -31,40 +33,47 @@ class AIRepoAnalyzer:
         Returns:
             Complete RepoAnalysis with all discovered elements
         """
-        print("[AI Analyzer] Gathering repository structure...")
+        # Create progress bar for analysis steps
+        with tqdm(total=6, desc="AI Analysis", unit="step", position=1, leave=False) as pbar:
+            # Step 1: Get directory tree and file list
+            pbar.set_description("Gathering file tree")
+            file_tree = self._get_file_tree()
+            pbar.update(1)
 
-        # Step 1: Get directory tree and file list
-        file_tree = self._get_file_tree()
+            # Step 2: Use AI to identify key directories
+            pbar.set_description("Identifying directories")
+            dir_info = self._identify_directories(file_tree)
+            pbar.update(1)
 
-        # Step 2: Use AI to identify key directories
-        print("[AI Analyzer] Identifying key directories...")
-        dir_info = self._identify_directories(file_tree)
+            # Step 3: Extract test files and analyze them
+            pbar.set_description("Analyzing tests")
+            tests = self._analyze_tests(dir_info.tests_dir)
+            pbar.update(1)
 
-        # Step 3: Extract test files and analyze them
-        print("[AI Analyzer] Analyzing test files...")
-        tests = self._analyze_tests(dir_info.tests_dir)
+            # Step 4: Extract sequence files
+            pbar.set_description("Analyzing sequences")
+            sequences = self._analyze_sequences(dir_info.sequences_dir)
+            pbar.update(1)
 
-        # Step 4: Extract sequence files
-        print("[AI Analyzer] Analyzing sequences...")
-        sequences = self._analyze_sequences(dir_info.sequences_dir)
+            # Step 5: Find covergroups
+            pbar.set_description("Finding covergroups")
+            covergroups = self._find_covergroups(dir_info)
+            pbar.update(1)
 
-        # Step 5: Find covergroups
-        print("[AI Analyzer] Finding covergroups...")
-        covergroups = self._find_covergroups(dir_info)
+            # Step 6: Detect build system and simulators
+            pbar.set_description("Detecting build system")
+            build_info = self._detect_build_system()
+            pbar.update(1)
 
-        # Step 6: Detect build system and simulators
-        print("[AI Analyzer] Detecting build system...")
-        build_info = self._detect_build_system()
-
-        # Construct analysis
-        analysis = RepoAnalysis(
-            repo_root=self.repo_root,
-            tests=tests,
-            sequences=sequences,
-            covergroups=covergroups,
-            build_system=build_info.get("build_system"),
-            detected_simulators=build_info.get("simulators", [])
-        )
+            # Construct analysis
+            analysis = RepoAnalysis(
+                repo_root=self.repo_root,
+                tests=tests,
+                sequences=sequences,
+                covergroups=covergroups,
+                build_system=build_info.get("build_system"),
+                detected_simulators=build_info.get("simulators", [])
+            )
 
         # Set directory paths
         if dir_info.tests_dir:
@@ -187,7 +196,7 @@ class AIRepoAnalyzer:
 
         # If we found exactly one test directory, use it directly (no need for AI to choose)
         if len(test_dir_candidates) == 1:
-            print(f"[AI Analyzer] Found single test directory: {test_dir_candidates[0]['path']}")
+            tqdm.write(f"[AI Analyzer] Found single test directory: {test_dir_candidates[0]['path']}")
             return DirectoryInfo(
                 tests_dir=test_dir_candidates[0]['path'],
                 sequences_dir=None,
@@ -246,10 +255,10 @@ CRITICAL RULES:
             if result.tests_dir:
                 test_path = self.repo_root / result.tests_dir
                 if not test_path.exists():
-                    print(f"[AI Analyzer] Warning: AI suggested non-existent path: {result.tests_dir}")
+                    tqdm.write(f"[AI Analyzer] Warning: AI suggested non-existent path: {result.tests_dir}")
                     # Use first candidate we actually found
                     if test_dir_candidates:
-                        print(f"[AI Analyzer] Using first discovered directory instead: {test_dir_candidates[0]['path']}")
+                        tqdm.write(f"[AI Analyzer] Using first discovered directory instead: {test_dir_candidates[0]['path']}")
                         result.tests_dir = test_dir_candidates[0]['path']
                     else:
                         result.tests_dir = None
@@ -257,10 +266,10 @@ CRITICAL RULES:
             return result
 
         except Exception as e:
-            print(f"[AI Analyzer] Warning: Could not parse directory info: {e}")
+            tqdm.write(f"[AI Analyzer] Warning: Could not parse directory info: {e}")
             # Fallback to first candidate if available
             if test_dir_candidates:
-                print(f"[AI Analyzer] Using first discovered directory as fallback: {test_dir_candidates[0]['path']}")
+                tqdm.write(f"[AI Analyzer] Using first discovered directory as fallback: {test_dir_candidates[0]['path']}")
                 return DirectoryInfo(
                     tests_dir=test_dir_candidates[0]['path'],
                     sequences_dir=None,
@@ -303,7 +312,7 @@ CRITICAL RULES:
         tests = []
 
         # Analyze each identified test file with AI
-        for test_file in test_file_paths[:100]:
+        for test_file in tqdm(test_file_paths[:100], desc="Analyzing tests", unit="file"):
             try:
                 content = test_file.read_text()[:5000]  # First 5k chars
 
@@ -315,7 +324,7 @@ CRITICAL RULES:
                 if test_info:
                     tests.append(test_info)
             except Exception as e:
-                print(f"[AI Analyzer] Warning: Could not analyze {test_file}: {e}")
+                tqdm.write(f"[AI Analyzer] Warning: Could not analyze {test_file.name}: {e}")
 
         return tests
 
@@ -373,9 +382,8 @@ Return format (STRICT):
             )
 
             file_paths = result.files
-            print(f"[AI Analyzer] AI identified {len(file_paths)} test files:")
-            for fpath in file_paths:
-                print(f"  - {fpath}")
+            tqdm.write(f"[AI Analyzer] AI identified {len(file_paths)} test files")
+            # Don't print individual files to keep progress bar clean
 
             # Convert to Path objects
             paths = []
@@ -417,7 +425,7 @@ Return format (STRICT):
                 if full_path and full_path.exists():
                     paths.append(full_path)
                 else:
-                    print(f"[AI Analyzer] File not found: {fpath} (tried multiple path interpretations)")
+                    tqdm.write(f"[AI Analyzer] Warning: File not found: {fpath}")
 
             # If AI returned empty list or no valid files, raise error
             if not paths:
@@ -525,7 +533,7 @@ If this IS a valid UVM test class, extract:
             )
 
         except Exception as e:
-            print(f"[AI Analyzer] ERROR: Failed to extract test from {file_path.name}: {e}")
+            tqdm.write(f"[AI Analyzer] ERROR: Failed to extract test from {file_path.name}: {e}")
             return None
 
     def _analyze_sequences(self, sequences_dir: Optional[str]) -> list[UVMSequence]:
@@ -722,7 +730,7 @@ Look for:
             }
 
         except Exception as e:
-            print(f"[AI Analyzer] Warning: AI build detection failed, using regex: {e}")
+            tqdm.write(f"[AI Analyzer] Warning: AI build detection failed, using regex fallback")
             # Fallback to regex-only detection
             regex_simulators = [sim_map[s] for s in detected_sims if s in sim_map]
             return {"build_system": BuildSystem.MAKEFILE, "simulators": regex_simulators}

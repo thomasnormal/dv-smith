@@ -5,9 +5,12 @@ import subprocess
 from pathlib import Path
 from typing import Any, Optional
 
+from ...config import get_logger
 from ...core.models import CoverageReport, Simulator
 from ..cov.xcelium_parser import XceliumCoverageParser
 from .base import SimulationResult, SimulatorAdapter, SimulatorConfig
+
+logger = get_logger(__name__)
 
 
 class XceliumAdapter(SimulatorAdapter):
@@ -76,8 +79,8 @@ class XceliumAdapter(SimulatorAdapter):
             for key, value in extra_args.items():
                 compile_cmd = compile_cmd.replace(f"{{{key}}}", value)
 
-        print(f"[Xcelium] Compiling in {work_dir}")
-        print(f"[Xcelium] Command: {compile_cmd}")
+        logger.info(f"Compiling in {work_dir}")
+        logger.debug(f"Command: {compile_cmd}")
 
         try:
             result = subprocess.run(
@@ -97,22 +100,22 @@ class XceliumAdapter(SimulatorAdapter):
             has_errors = "xrun: *E," in output or "Error-" in output
 
             if result.returncode != 0 or has_errors:
-                print(f"[Xcelium] Compilation failed. See {compile_log}")
+                logger.error(f"Compilation failed. See {compile_log}")
                 if has_errors:
                     # Print first few error lines
                     error_lines = [line for line in output.split('\n') if '*E,' in line or 'Error-' in line]
                     for line in error_lines[:5]:
-                        print(f"  {line}")
+                        logger.error(f"  {line}")
                 return False
 
-            print("[Xcelium] Compilation successful")
+            logger.info("Compilation successful")
             return True
 
         except subprocess.TimeoutExpired:
-            print("[Xcelium] Compilation timed out")
+            logger.error("Compilation timed out")
             return False
         except Exception as e:
-            print(f"[Xcelium] Compilation error: {e}")
+            logger.error(f"Compilation error: {e}")
             return False
 
     def run_test(self, sim_config: SimulatorConfig) -> SimulationResult:
@@ -145,8 +148,8 @@ class XceliumAdapter(SimulatorAdapter):
 
         log_file = sim_config.work_dir / f"{sim_config.test_name}.log"
 
-        print(f"[Xcelium] Running test: {sim_config.test_name}")
-        print(f"[Xcelium] Command: {run_cmd}")
+        logger.info(f"Running test: {sim_config.test_name}")
+        logger.debug(f"Command: {run_cmd}")
 
         import time
         start_time = time.time()
@@ -228,20 +231,20 @@ class XceliumAdapter(SimulatorAdapter):
             Normalized CoverageReport
         """
         if not sim_result.coverage_db_path or not sim_result.coverage_db_path.exists():
-            print("[Xcelium] No coverage database found")
+            logger.warning("No coverage database found")
             return CoverageReport(simulator=Simulator.XCELIUM)
 
         # Find the test-specific coverage directory (cov_work/scope/<testname>)
         # Look for the latest test directory under cov_work/scope/
         scope_dir = sim_result.coverage_db_path / "scope"
         if not scope_dir.exists():
-            print(f"[Xcelium] Scope directory not found: {scope_dir}")
+            logger.warning(f"Scope directory not found: {scope_dir}")
             return CoverageReport(simulator=Simulator.XCELIUM)
 
         # Get the most recent test directory (in case there are multiple)
         test_dirs = [d for d in scope_dir.iterdir() if d.is_dir()]
         if not test_dirs:
-            print(f"[Xcelium] No test directories found in {scope_dir}")
+            logger.warning(f"No test directories found in {scope_dir}")
             return CoverageReport(simulator=Simulator.XCELIUM)
 
         # Use the most recently modified test directory
@@ -282,7 +285,7 @@ class XceliumAdapter(SimulatorAdapter):
             return self.parser.parse(report_dir, sim_result.log_path)
 
         except Exception as e:
-            print(f"[Xcelium] Coverage extraction error: {e}")
+            logger.error(f"Coverage extraction error: {e}")
             return CoverageReport(simulator=Simulator.XCELIUM)
 
     def merge_coverage(self, coverage_dbs: list[Path], output_path: Path) -> Path:
@@ -301,7 +304,7 @@ class XceliumAdapter(SimulatorAdapter):
         db_list = " ".join(str(db) for db in coverage_dbs)
         merge_cmd = f"imc -exec 'merge {db_list}' -cwd {output_path}"
 
-        print(f"[Xcelium] Merging {len(coverage_dbs)} coverage databases")
+        logger.info(f"Merging {len(coverage_dbs)} coverage databases")
 
         try:
             result = subprocess.run(

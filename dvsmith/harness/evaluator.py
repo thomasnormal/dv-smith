@@ -4,6 +4,7 @@ import subprocess
 from pathlib import Path
 from typing import Any, Optional
 
+from ..config import get_logger
 # Import adapters to trigger registration
 from ..adapters.sim.base import SimulatorConfig, SimulatorRegistry
 from ..core.models import (
@@ -13,6 +14,8 @@ from ..core.models import (
     Simulator,
     TaskSpec,
 )
+
+logger = get_logger(__name__)
 
 
 class Evaluator:
@@ -56,7 +59,7 @@ class Evaluator:
 
         work_dir.mkdir(exist_ok=True, parents=True)
 
-        print(f"[Evaluator] Evaluating task: {task.id}")
+        logger.info(f"Evaluating task: {task.id}")
 
         # 1. Apply patch
         if not self._apply_patch(task, patch_path):
@@ -113,7 +116,7 @@ class Evaluator:
             )
 
             if result.returncode != 0:
-                print(f"[Evaluator] Patch check failed: {result.stderr}")
+                logger.error(f"Patch check failed: {result.stderr}")
                 return False
 
             # Apply the patch
@@ -127,7 +130,7 @@ class Evaluator:
             return result.returncode == 0
 
         except Exception as e:
-            print(f"[Evaluator] Patch application error: {e}")
+            logger.error(f"Patch application error: {e}")
             return False
 
     def _infer_test_name(self, task: TaskSpec) -> str:
@@ -371,7 +374,7 @@ class Evaluator:
         Returns:
             EvaluationResult with failure
         """
-        print(f"[Evaluator] Evaluation failed: {reason}")
+        logger.error(f"Evaluation failed: {reason}")
 
         return EvaluationResult(
             task_id=task.id,
@@ -399,13 +402,13 @@ class Evaluator:
             # Save result.json
             result_json_path = work_dir / "result.json"
             result_json_path.write_text(result.to_json())
-            print(f"[Evaluator] Saved result to {result_json_path}")
+            logger.info(f"Saved result to {result_json_path}")
 
             # Log paths are already in result (log_path, coverage_db_path)
             # These can be used for leaderboards, analysis, etc.
 
         except Exception as e:
-            print(f"[Evaluator] Warning: Could not persist artifacts: {e}")
+            logger.warning(f"Could not persist artifacts: {e}")
 
     def _select_simulator(self) -> Simulator:
         """Select simulator from profile or environment."""

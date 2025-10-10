@@ -1,17 +1,36 @@
 #!/usr/bin/env python3
 """dv-smith CLI - Convert SystemVerilog/UVM testbenches into DV gyms."""
 
-import argparse
 import os
 import sys
+
+# Disable Claude Code IDE integration hooks FIRST, before any other imports
+# The CLAUDECODE env var causes claude-agent-sdk to try connecting to IDE hooks
+# which can hang in non-interactive or background processes
+# Also clear it if running in Amp (AGENT=amp), which uses Claude Code infrastructure
+if os.getenv('CLAUDECODE') or os.getenv('AGENT') == 'amp':
+    os.environ.pop('CLAUDECODE', None)
+    # Set a marker to prevent claude CLI from detecting parent IDE
+    os.environ['CLAUDE_NO_IDE'] = '1'
+    # Redirect stdout to stderr to avoid stdout hooks that can cause hangs
+    sys.stderr.write("[DVSMITH] Redirecting stdout to stderr to avoid Claude Code hooks\n")
+    sys.stderr.flush()
+    sys.stdout = sys.stderr
+
+import argparse
 from pathlib import Path
 from typing import Optional
 
 import yaml
 from dotenv import load_dotenv
+from tqdm import tqdm
 
 # Load environment variables from .env file
 load_dotenv()
+
+# Configure logging
+from .config import get_logger
+logger = get_logger(__name__)
 
 # Import adapters to trigger registration
 from .adapters.sim.base import SimulatorRegistry
@@ -22,8 +41,8 @@ from .core.task_generator import TaskGenerator
 try:
     from .core.ai_analyzer import AIRepoAnalyzer
 except ImportError as e:
-    print("[ERROR] Failed to import AI analyzer. Please install required dependencies:")
-    print("  pip install anthropic")
+    logger.error("Failed to import AI analyzer. Please install required dependencies:")
+    logger.error("  pip install anthropic")
     sys.exit(1)
 
 
@@ -57,7 +76,7 @@ class DVSmith:
             commit: Specific commit to use (default: HEAD)
             hints: Optional hints for analysis (paths, simulators, etc.)
         """
-        print(f"[dv-smith] Ingesting repository: {repo_url}")
+        logger.info(f"Ingesting repository: {repo_url}")
 
         if name is None:
             # Derive name from repo URL
@@ -67,7 +86,7 @@ class DVSmith:
             else:
                 name = Path(repo_url).stem.replace("-", "_")
 
-        print(f"[dv-smith] Gym name: {name}")
+        logger.info(f"Gym name: {name}")
 
         # Handle git URLs - clone to workspace
         if repo_url.startswith(("http://", "https://", "git@")):
@@ -80,31 +99,32 @@ class DVSmith:
             repo_path = clones_dir / name
 
             if repo_path.exists():
-                print(f"[dv-smith] Repository already cloned at: {repo_path}")
-                print("[dv-smith] Using existing clone...")
-            else:
-                print(f"[dv-smith] Cloning repository to: {repo_path}")
-                try:
-                    result = subprocess.run(
-                        ["git", "clone", repo_url, str(repo_path)],
-                        capture_output=True,
-                        text=True,
-                        timeout=300
-                    )
-                    if result.returncode != 0:
-                        print(f"[ERROR] Failed to clone repository: {result.stderr}")
-                        sys.exit(1)
-                    print("[dv-smith] Clone successful")
-                except subprocess.TimeoutExpired:
-                    print("[ERROR] Clone timed out after 5 minutes")
+                logger.info(f"Removing existing clone at: {repo_path}")
+                import shutil
+                shutil.rmtree(repo_path)
+            
+            logger.info(f"Cloning repository to: {repo_path}")
+            try:
+                result = subprocess.run(
+                    ["git", "clone", repo_url, str(repo_path)],
+                    capture_output=True,
+                    text=True,
+                    timeout=300
+                )
+                if result.returncode != 0:
+                    logger.error(f"Failed to clone repository: {result.stderr}")
                     sys.exit(1)
-                except Exception as e:
-                    print(f"[ERROR] Failed to clone: {e}")
-                    sys.exit(1)
+                logger.info("Clone successful")
+            except subprocess.TimeoutExpired:
+                logger.error("Clone timed out after 5 minutes")
+                sys.exit(1)
+            except Exception as e:
+                logger.error(f"Failed to clone: {e}")
+                sys.exit(1)
 
             # Checkout specific commit if requested
             if commit:
-                print(f"[dv-smith] Checking out commit: {commit}")
+                logger.info(f"Checking out commit: {commit}")
                 try:
                     subprocess.run(
                         ["git", "checkout", commit],
@@ -113,52 +133,64 @@ class DVSmith:
                         check=True
                     )
                 except subprocess.CalledProcessError as e:
-                    print(f"[ERROR] Failed to checkout commit: {e.stderr}")
+                    logger.error(f"Failed to checkout commit: {e.stderr}")
                     sys.exit(1)
         else:
             # Local path
             repo_path = Path(repo_url).resolve()
             if not repo_path.exists():
-                print(f"[ERROR] Repository not found: {repo_path}")
+                logger.error(f"Repository not found: {repo_path}")
                 sys.exit(1)
 
         # Check for Anthropic API key
         if not os.getenv("ANTHROPIC_API_KEY"):
-            print("[ERROR] ANTHROPIC_API_KEY environment variable is required")
-            print("[ERROR] Set it with: export ANTHROPIC_API_KEY=your-key-here")
-            print("[ERROR] Or add it to .env file")
+            logger.error("ANTHROPIC_API_KEY environment variable is required")
+            logger.error("Set it with: export ANTHROPIC_API_KEY=your-key-here")
+            logger.error("Or add it to .env file")
             sys.exit(1)
 
-        # Use AI analyzer
-        print("[dv-smith] Using AI-powered analysis...")
-        try:
-            ai_analyzer = AIRepoAnalyzer(repo_path)
-            analysis = ai_analyzer.analyze()
+        # Use AI analyzer with progress tracking
+        logger.info("Using AI-powered analysis...")
 
-            print(f"  ✓ Found {len(analysis.tests)} tests")
-            print(f"  ✓ Found {len(analysis.sequences)} sequences")
-            print(f"  ✓ Found {len(analysis.covergroups)} covergroups")
-            print(f"  ✓ Build system: {analysis.build_system}")
-            print(f"  ✓ Detected simulators: {[s.value for s in analysis.detected_simulators]}")
+        # Create progress bar for main ingest steps
+        with tqdm(total=3, desc="Ingesting", unit="step", position=0) as pbar:
+            # Step 1: AI analysis
+            pbar.set_description("Analyzing repository")
+            try:
+                ai_analyzer = AIRepoAnalyzer(repo_path)
+                analysis = ai_analyzer.analyze()
+                pbar.update(1)
 
-        except Exception as e:
-            print(f"[ERROR] AI analysis failed: {e}")
-            print("[ERROR] Please check your ANTHROPIC_API_KEY and try again")
-            sys.exit(1)
+                logger.info(f"✓ Found {len(analysis.tests)} tests")
+                logger.info(f"✓ Found {len(analysis.sequences)} sequences")
+                logger.info(f"✓ Found {len(analysis.covergroups)} covergroups")
+                logger.info(f"✓ Build system: {analysis.build_system}")
+                logger.info(f"✓ Detected simulators: {[s.value for s in analysis.detected_simulators]}")
 
-        # Generate profile
-        print("[dv-smith] Generating profile...")
-        profile = self._generate_profile(name, repo_path, analysis)
-        
-        # Cache the full analysis to avoid re-analyzing in build
-        profile['_analysis_cache'] = analysis.to_dict()
+            except Exception as e:
+                pbar.close()
+                logger.error(f"AI analysis failed: {e}")
+                logger.error("Please check your ANTHROPIC_API_KEY and try again")
+                sys.exit(1)
 
-        profile_path = self.profiles_dir / f"{name}.yaml"
-        with open(profile_path, "w") as f:
-            yaml.dump(profile, f, default_flow_style=False, sort_keys=False)
+            # Step 2: Generate profile
+            pbar.set_description("Generating profile")
+            profile = self._generate_profile(name, repo_path, analysis)
 
-        print(f"[dv-smith] Profile saved: {profile_path}")
-        print("[dv-smith] Ingest complete!")
+            # Cache the full analysis to avoid re-analyzing in build
+            profile['_analysis_cache'] = analysis.to_dict()
+            pbar.update(1)
+
+            # Step 3: Save profile
+            pbar.set_description("Saving profile")
+            profile_path = self.profiles_dir / f"{name}.yaml"
+            with open(profile_path, "w") as f:
+                yaml.dump(profile, f, default_flow_style=False, sort_keys=False)
+            pbar.update(1)
+            pbar.set_description("Complete")
+
+        logger.info(f"Profile saved: {profile_path}")
+        logger.info("Ingest complete!")
 
     def build(self, name: str, simulators: Optional[list[str]] = None, task_types: str = "stimulus", skip_verification: bool = False) -> None:
         """Build a gym from a profile.
@@ -169,11 +201,11 @@ class DVSmith:
             task_types: Comma-separated task types: stimulus, coverage_func, all
             skip_verification: Skip testbench compilation verification
         """
-        print(f"[dv-smith] Building gym: {name}")
+        logger.info(f"Building gym: {name}")
 
         profile_path = self.profiles_dir / f"{name}.yaml"
         if not profile_path.exists():
-            print(f"[ERROR] Profile not found: {profile_path}")
+            logger.error(f"Profile not found: {profile_path}")
             sys.exit(1)
 
         # Load profile
@@ -182,13 +214,13 @@ class DVSmith:
 
         repo_path = Path(profile["repo_url"])
         if not repo_path.exists():
-            print(f"[ERROR] Repository not found: {repo_path}")
+            logger.error(f"Repository not found: {repo_path}")
             sys.exit(1)
 
         if simulators:
-            print(f"[dv-smith] Target simulators: {', '.join(simulators)}")
+            logger.info(f"Target simulators: {', '.join(simulators)}")
         else:
-            print("[dv-smith] Using all simulators from profile")
+            logger.info("Using all simulators from profile")
 
         # Create gym directory
         gym_dir = self.gyms_dir / name
@@ -196,50 +228,52 @@ class DVSmith:
 
         # Check for Anthropic API key (needed for task generation)
         if not os.getenv("ANTHROPIC_API_KEY"):
-            print("[ERROR] ANTHROPIC_API_KEY environment variable is required for task generation")
-            print("[ERROR] Set it with: export ANTHROPIC_API_KEY=your-key-here")
+            logger.error("ANTHROPIC_API_KEY environment variable is required for task generation")
+            logger.error("Set it with: export ANTHROPIC_API_KEY=your-key-here")
             sys.exit(1)
 
         # Try to load cached analysis from profile
         if '_analysis_cache' in profile:
-            print("[dv-smith] Loading cached analysis from profile...")
+            logger.info(f"Loading cached analysis from {profile_path}...")
             try:
                 from .core.models import RepoAnalysis
                 analysis = RepoAnalysis.from_dict(profile['_analysis_cache'], repo_root=repo_path)
-                print(f"  ✓ Loaded {len(analysis.tests)} tests from cache")
+                logger.info(f"✓ Loaded {len(analysis.tests)} tests from {profile_path}")
             except Exception as e:
-                print(f"  ⚠️  Cache load failed: {e}")
-                print("[dv-smith] Re-analyzing repository...")
+                logger.warning(f"Cache load failed: {e}")
+                logger.info("Re-analyzing repository...")
                 ai_analyzer = AIRepoAnalyzer(repo_path)
                 analysis = ai_analyzer.analyze()
         else:
             # No cache, need to analyze
-            print("[dv-smith] No cached analysis found, analyzing repository...")
+            logger.info("No cached analysis found, analyzing repository...")
             try:
                 ai_analyzer = AIRepoAnalyzer(repo_path)
                 analysis = ai_analyzer.analyze()
             except Exception as e:
-                print(f"[ERROR] AI analysis failed: {e}")
-                print("[ERROR] Please check your ANTHROPIC_API_KEY and try again")
+                logger.error(f"AI analysis failed: {e}")
+                logger.error("Please check your ANTHROPIC_API_KEY and try again")
                 sys.exit(1)
 
         # Step 1: Copy source structure (including tests - we'll clean intelligently)
-        print("[dv-smith] Step 1: Setting up gym structure...")
+        logger.info("Step 1: Setting up gym structure...")
+        logger.debug(f"Calling _setup_gym_structure with gym_dir={gym_dir}, repo_path={repo_path}")
         self._setup_gym_structure(gym_dir, repo_path, profile)
+        logger.debug("_setup_gym_structure completed")
 
         # Step 1b: Intelligently clean test directory using Claude SDK
-        print("[dv-smith] Step 1b: Intelligently cleaning test directory...")
+        logger.info("Step 1b: Intelligently cleaning test directory...")
         from .core.gym_cleaner import GymCleaner
 
         cleaner = GymCleaner(gym_dir, repo_path)
         cleanup_result = cleaner.analyze_and_clean([test.file_path for test in analysis.tests])
 
-        print(f"  Identified {len(cleanup_result['keep'])} infrastructure files to keep")
-        print(f"  Removing {len(cleanup_result['remove'])} task test files")
+        logger.info(f"Identified {len(cleanup_result['keep'])} infrastructure files to keep")
+        logger.info(f"Removing {len(cleanup_result['remove'])} task test files")
 
         # Remove only task test files, keep infrastructure
         removed_count = 0
-        for test_file_path in cleanup_result['remove']:
+        for test_file_path in tqdm(cleanup_result['remove'], desc="Removing task tests", unit="file", leave=False):
             test_file = Path(test_file_path)
             try:
                 # Calculate relative path from repo to test file
@@ -258,22 +292,22 @@ class DVSmith:
                     test_file.unlink()
                     removed_count += 1
             except Exception as e:
-                print(f"  Warning: Could not remove {test_file.name}: {e}")
+                logger.warning(f"Could not remove {test_file.name}: {e}")
 
-        print(f"  Successfully removed {removed_count} task test files")
+        logger.info(f"Successfully removed {removed_count} task test files")
 
         # Step 1c: Clean package includes for removed tests
-        print("[dv-smith] Step 1c: Cleaning package includes...")
+        logger.info("Step 1c: Cleaning package includes...")
         removed_test_names = [Path(test_file_path).name for test_file_path in cleanup_result['remove']]
         include_cleanup = cleaner.clean_package_includes(removed_test_names)
 
         if include_cleanup['modified_files']:
-            print(f"  Cleaned {len(include_cleanup['modified_files'])} package file(s)")
+            logger.info(f"Cleaned {len(include_cleanup['modified_files'])} package file(s)")
         if include_cleanup.get('errors'):
-            print(f"  ⚠️  Warnings: {len(include_cleanup['errors'])} package cleanup issues")
+            logger.warning(f"Warnings: {len(include_cleanup['errors'])} package cleanup issues")
 
         # Step 2: Generate task specifications
-        print("[dv-smith] Step 2: Generating task specifications...")
+        logger.info("Step 2: Generating task specifications...")
         tasks_dir = gym_dir / "tasks"
         tasks_dir.mkdir(exist_ok=True)
 
@@ -585,71 +619,30 @@ class DVSmith:
             print("  (none detected)")
 
     def show_ai_logs(self, tail: int = 10, full: bool = False) -> None:
-        """Show AI call logs.
+        """Show AI call logs with rich visualization.
 
         Args:
             tail: Number of recent entries to show (default: 10)
             full: Show full log content instead of summary
         """
-        from .core.ai_structured import AI_LOG_FILE
-        import json
-
-        if not AI_LOG_FILE.exists():
-            print(f"[dv-smith] No AI logs found at: {AI_LOG_FILE}")
+        from .log_viewer import load_ai_calls, display_summary, display_calls_conversation
+        from rich.console import Console
+        
+        console = Console()
+        calls = load_ai_calls(limit=tail if tail > 0 else None)
+        
+        if not calls:
+            console.print("[yellow]No AI calls found in log[/yellow]")
             return
-
-        print(f"[dv-smith] AI call logs: {AI_LOG_FILE}")
-        print()
-
-        # Read all log entries
-        entries = []
-        with AI_LOG_FILE.open() as f:
-            for line in f:
-                try:
-                    entries.append(json.loads(line))
-                except json.JSONDecodeError:
-                    continue
-
-        if not entries:
-            print("[dv-smith] No log entries found")
-            return
-
-        # Show last N entries
-        recent_entries = entries[-tail:] if tail > 0 else entries
-
-        for i, entry in enumerate(recent_entries, 1):
-            timestamp = entry.get("timestamp", "unknown")
-            model = entry.get("response_model", "unknown")
-            duration = entry.get("duration_ms", 0)
-            error = entry.get("error")
-
-            print(f"[{i}] {timestamp}")
-            print(f"    Model: {model}")
-            print(f"    Duration: {duration:.0f}ms")
-
-            if full:
-                prompt = entry.get("prompt", "")
-                print(f"    Prompt: {prompt[:200]}..." if len(prompt) > 200 else f"    Prompt: {prompt}")
-
-                if error:
-                    print(f"    Error: {error}")
-                else:
-                    response = entry.get("response", {})
-                    response_str = json.dumps(response, indent=2)
-                    if len(response_str) > 300:
-                        print(f"    Response: {response_str[:300]}...")
-                    else:
-                        print(f"    Response: {response_str}")
-            else:
-                if error:
-                    print(f"    Status: ✗ Error - {error[:100]}")
-                else:
-                    print(f"    Status: ✓ Success")
-
-            print()
-
-        print(f"Showing {len(recent_entries)} of {len(entries)} total entries")
-        print(f"Use --tail N to see more entries, or --full for complete details")
+        
+        # Show summary
+        display_summary(calls, console)
+        
+        # Show conversation
+        display_calls_conversation(calls, console)
+        
+        console.print(f"\n{'─' * 80}")
+        console.print(f"[dim]Showing {len(calls)} entries | Use --tail N for more[/dim]")
 
     def _setup_gym_structure(self, gym_dir: Path, repo_path: Path, profile: dict) -> None:
         """Set up basic gym directory structure.
@@ -659,23 +652,38 @@ class DVSmith:
             repo_path: Source repository path
             profile: Profile configuration
         """
+        logger.debug("Inside _setup_gym_structure, importing shutil...")
         import shutil
+        logger.debug("shutil imported")
 
         # Create basic directories
-        (gym_dir / "tests").mkdir(exist_ok=True)
-        (gym_dir / "sequences").mkdir(exist_ok=True)
-        (gym_dir / "tasks").mkdir(exist_ok=True)
-        (gym_dir / "backups" / "original_tests").mkdir(exist_ok=True, parents=True)
-        (gym_dir / "work").mkdir(exist_ok=True)
+        directories = [
+            gym_dir / "tests",
+            gym_dir / "sequences",
+            gym_dir / "tasks",
+            gym_dir / "backups" / "original_tests",
+            gym_dir / "work"
+        ]
+        
+        logger.debug(f"Creating {len(directories)} directories...")
+        for dir_path in tqdm(directories, desc="Creating directories", unit="dir", leave=False):
+            dir_path.mkdir(exist_ok=True, parents=True)
+        logger.debug("Directories created")
 
         # Copy ALL source files initially (including test directory)
         # We'll intelligently remove task test files later while keeping infrastructure
         src_dir = repo_path / "src"
+        logger.debug(f"Checking src_dir: {src_dir}, exists={src_dir.exists()}")
         if src_dir.exists():
             dest_src = gym_dir / "src"
             if dest_src.exists():
+                logger.debug(f"Removing existing dest_src: {dest_src}")
                 shutil.rmtree(dest_src)
-            shutil.copytree(src_dir, dest_src)
+            logger.debug(f"Copying {src_dir} -> {dest_src}")
+            with tqdm(total=1, desc="Copying source files", unit="dir", leave=False) as pbar:
+                shutil.copytree(src_dir, dest_src)
+                pbar.update(1)
+            logger.debug("Source copy complete")
 
         # Copy sim directories
         sim_dir = repo_path / "sim"
@@ -683,10 +691,13 @@ class DVSmith:
             dest_sim = gym_dir / "sim"
             if dest_sim.exists():
                 shutil.rmtree(dest_sim)
-            shutil.copytree(sim_dir, dest_sim)
+            with tqdm(total=1, desc="Copying sim files", unit="dir", leave=False) as pbar:
+                shutil.copytree(sim_dir, dest_sim)
+                pbar.update(1)
 
         # Copy any README or docs
-        for filename in ["README.md", "README", "LICENSE", "LICENSE.md"]:
+        doc_files = ["README.md", "README", "LICENSE", "LICENSE.md"]
+        for filename in tqdm(doc_files, desc="Copying documentation", unit="file", leave=False):
             src_file = repo_path / filename
             if src_file.exists():
                 shutil.copy2(src_file, gym_dir / filename)
@@ -705,7 +716,7 @@ class DVSmith:
         backup_dir.mkdir(exist_ok=True, parents=True)
 
         # Copy each test file
-        for test in analysis.tests:
+        for test in tqdm(analysis.tests, desc="Backing up tests", unit="file", leave=False):
             src_file = test.file_path
             if src_file.exists():
                 # Preserve relative structure

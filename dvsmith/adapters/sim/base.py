@@ -5,6 +5,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
 
+from tqdm import tqdm
+
 from ...core.models import CoverageReport, Simulator
 
 
@@ -137,7 +139,7 @@ class SimulatorAdapter(ABC):
             List of SimulationResults
         """
         results = []
-        for i, test in enumerate(tests):
+        for i, test in tqdm(enumerate(tests), total=len(tests), desc="Running regression", unit="test"):
             seed = seeds[i] if seeds and i < len(seeds) else None
             config = SimulatorConfig(
                 work_dir=work_dir,
