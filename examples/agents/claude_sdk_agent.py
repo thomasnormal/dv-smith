@@ -147,20 +147,40 @@ class ClaudeSDKAgent:
                             print(f"💭 Thinking...", flush=True)
                         elif isinstance(block, ToolUseBlock):
                             # Show which tool and what it's doing
-                            if block.name == "Read":
-                                path = block.input.get("path", "?")
-                                print(f"🔧 Read: {Path(path).name}", flush=True)
-                            elif block.name == "Write":
-                                path = block.input.get("file_path", "?")
-                                print(f"✍️  Write: {Path(path).name}", flush=True)
-                            elif block.name == "Edit":
-                                path = block.input.get("path", "?")
-                                print(f"✏️  Edit: {Path(path).name}", flush=True)
-                            elif block.name == "Glob":
-                                pattern = block.input.get("filePattern", "?")
-                                print(f"🔍 Glob: {pattern}", flush=True)
+                            # Extract meaningful info from any key in input
+                            input_keys = list(block.input.keys()) if block.input else []
+                            detail = ""
+                            
+                            if block.name == "Read" and input_keys:
+                                # Try common path parameter names
+                                path = block.input.get("path") or block.input.get("file_path") or block.input.get(input_keys[0])
+                                if path and path != "?":
+                                    detail = f": {Path(str(path)).name}"
+                                print(f"🔧 Read{detail}", flush=True)
+                            elif block.name == "Write" and input_keys:
+                                path = block.input.get("file_path") or block.input.get("path") or block.input.get(input_keys[0])
+                                if path and path != "?":
+                                    detail = f": {Path(str(path)).name}"
+                                print(f"✍️  Write{detail}", flush=True)
+                            elif block.name == "Edit" and input_keys:
+                                path = block.input.get("path") or block.input.get("file_path") or block.input.get(input_keys[0])
+                                if path and path != "?":
+                                    detail = f": {Path(str(path)).name}"
+                                print(f"✏️  Edit{detail}", flush=True)
+                            elif block.name == "Glob" and input_keys:
+                                pattern = block.input.get("filePattern") or block.input.get("pattern") or str(block.input.get(input_keys[0], ""))
+                                if pattern and len(pattern) < 40:
+                                    detail = f": {pattern}"
+                                print(f"🔍 Glob{detail}", flush=True)
+                            elif block.name == "Bash" and input_keys:
+                                cmd = block.input.get("cmd") or block.input.get("command") or str(block.input.get(input_keys[0], ""))
+                                if cmd:
+                                    cmd_preview = cmd[:40] + "..." if len(cmd) > 40 else cmd
+                                    print(f"⚙️  Bash: {cmd_preview}", flush=True)
+                                else:
+                                    print(f"⚙️  Bash", flush=True)
                             else:
-                                print(f"🔧 Tool: {block.name}", flush=True)
+                                print(f"🔧 {block.name}", flush=True)
                             
                             if block.name == "Write":
                                 # Claude wrote a file
