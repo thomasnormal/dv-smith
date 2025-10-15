@@ -28,6 +28,7 @@ load_dotenv()
 from ..core.ai_analyzer import AIRepoAnalyzer
 from ..config import Profile
 from .live_feed import with_live_agent_feed
+from .agent_runner import run_agent_with_feed
 
 # Read version from pyproject.toml
 try:
@@ -484,6 +485,31 @@ def cvdp_export(
         console.print(f"[cyan]Simulator:[/] {prefer_sim or 'auto-detected'}")
     
     asyncio.run(run_export())
+
+
+@app.command()
+def run(
+    agent: Path = typer.Argument(..., help="Path to agent script (e.g., examples/agents/claude_sdk_agent.py)"),
+    task: Path = typer.Argument(..., help="Path to task markdown file"),
+    output: Path = typer.Argument(..., help="Output directory for solution"),
+):
+    """Run an agent on a task with live feed display."""
+    
+    async def run_agent():
+        if not agent.exists():
+            console.print(f"[red]✗ Agent script not found:[/] {agent}")
+            raise typer.Exit(1)
+        
+        if not task.exists():
+            console.print(f"[red]✗ Task file not found:[/] {task}")
+            raise typer.Exit(1)
+        
+        exit_code = await run_agent_with_feed(agent, task, output, console)
+        
+        if exit_code != 0:
+            raise typer.Exit(exit_code)
+    
+    asyncio.run(run_agent())
 
 
 # Add cvdp sub-app to main app
