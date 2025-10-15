@@ -335,7 +335,7 @@ Return CleanupPlan with:
 - keep: List of filenames to preserve (base_test.sv, *_pkg.sv, etc.)
 - remove: List of filenames to delete (task test files)
 
-Work from the test directory: {gym_dir / analysis.tests_dir.relative_to(repo_path) if analysis.tests_dir else gym_dir}
+Explore files and decide what to keep vs remove.
 """
         
         # Call Claude directly (not via with_live_agent_feed since it's quick)
@@ -349,7 +349,15 @@ Work from the test directory: {gym_dir / analysis.tests_dir.relative_to(repo_pat
             )
         
         # Execute cleanup
-        test_dir_in_gym = gym_dir / analysis.tests_dir.relative_to(repo_path) if analysis.tests_dir else None
+        if analysis.tests_dir:
+            # tests_dir might be absolute or relative
+            if analysis.tests_dir.is_absolute():
+                test_dir_rel = analysis.tests_dir.relative_to(repo_path)
+            else:
+                test_dir_rel = analysis.tests_dir
+            test_dir_in_gym = gym_dir / test_dir_rel
+        else:
+            test_dir_in_gym = None
         if test_dir_in_gym and test_dir_in_gym.exists():
             removed_count = 0
             for filename in cleanup_plan.remove:
