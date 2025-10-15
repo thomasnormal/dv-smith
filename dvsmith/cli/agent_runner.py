@@ -1,9 +1,7 @@
 """Agent runner with live feed display."""
 
 import asyncio
-import subprocess
 from pathlib import Path
-from typing import Optional
 import re
 
 from rich.console import Console
@@ -17,7 +15,7 @@ async def run_agent_with_feed(
     task_file: Path,
     output_dir: Path,
     console: Console,
-    max_messages: int = 8
+    max_messages: int = 10
 ) -> int:
     """Run an agent script with live feed display.
     
@@ -45,7 +43,7 @@ async def run_agent_with_feed(
     console.print("")
     
     # Run agent with live feed
-    with Live(console=console, refresh_per_second=2) as live:
+    with Live(console=console, refresh_per_second=4) as live:
         def update_display():
             """Update the live display."""
             if messages:

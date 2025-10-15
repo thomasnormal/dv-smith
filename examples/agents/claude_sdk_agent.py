@@ -126,8 +126,13 @@ class ClaudeSDKAgent:
 
             # Process responses to extract generated code and track file modifications
             async for message in client.receive_response():
+                # Print to stdout for live feed
+                print(f"[Agent] Processing message: {type(message).__name__}", flush=True)
                 if isinstance(message, AssistantMessage):
                     for block in message.content:
+                        # Report tool usage to stdout
+                        if hasattr(block, '__class__'):
+                            print(f"[Agent] Block type: {block.__class__.__name__}", flush=True)
                         if isinstance(block, TextBlock):
                             # Extract code from response if present
                             if "```systemverilog" in block.text:
@@ -136,6 +141,7 @@ class ClaudeSDKAgent:
                                 )[0]
                                 test_code += code.strip()
                         elif isinstance(block, ToolUseBlock):
+                            print(f"[Agent] Tool used: {block.name}", flush=True)
                             if block.name == "Write":
                                 # Claude wrote a file
                                 file_path = block.input.get("file_path", "")
