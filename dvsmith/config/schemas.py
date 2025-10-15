@@ -99,8 +99,8 @@ class Profile(BaseModel):
         description="Profile metadata"
     )
     
-    # Private field for caching analysis
-    _analysis_cache: Optional[dict] = None
+    # Analysis cache (saved to YAML for build command)
+    analysis_cache: Optional[dict] = Field(None, description="Cached analysis results")
     
     @classmethod
     def from_yaml(cls, path: Path) -> "Profile":
@@ -132,8 +132,8 @@ class Profile(BaseModel):
         """
         path.parent.mkdir(parents=True, exist_ok=True)
         
-        # Convert to dict and exclude private fields
-        data = self.model_dump(exclude={"_analysis_cache"}, exclude_none=True)
+        # Convert to dict - include analysis cache for build command
+        data = self.model_dump(exclude_none=True, by_alias=False)
         
         with open(path, "w") as f:
             yaml.dump(data, f, sort_keys=False, default_flow_style=False)

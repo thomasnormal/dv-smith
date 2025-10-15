@@ -6,8 +6,8 @@ import os
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Type, TypeVar, Optional, Any
-from pydantic import BaseModel
+from typing import Type, TypeVar, Optional, Any, Callable
+from pydantic import BaseModel, TypeAdapter
 
 from filelock import FileLock
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
@@ -88,6 +88,28 @@ def log_ai_call(
         logger.warning(f"Failed to log AI call: {e}")
 
 
+def _make_adapter(model: type):
+    """Create schema, validator, and name for BaseModel or dataclass/typing types.
+    
+    Args:
+        model: Pydantic BaseModel class, dataclass, or typing type
+        
+    Returns:
+        Tuple of (schema dict, validation function, model name)
+    """
+    if isinstance(model, type) and issubclass(model, BaseModel):
+        schema = model.model_json_schema()
+        validate = lambda data: model.model_validate(data)
+        model_name = model.__name__
+    else:
+        # Use TypeAdapter for dataclasses and other types
+        ta = TypeAdapter(model)
+        schema = ta.json_schema()
+        validate = lambda data: ta.validate_python(data)
+        model_name = getattr(model, "__name__", str(model))
+    return schema, validate, model_name
+
+
 @retry(
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=1, min=2, max=10),
@@ -96,27 +118,31 @@ def log_ai_call(
 )
 async def query_with_pydantic_response(
     prompt: str,
-    response_model: Type[ModelT],
+    response_model: type,
     system_prompt: str = "",
     cwd: str = ".",
-) -> ModelT:
+    status_cb: Optional[Callable[[str], None]] = None,
+    postprocess: Optional[Callable[[Any], Any]] = None,
+) -> Any:
     """
-    Query Claude and get a structured Pydantic response.
+    Query Claude and get a structured response (Pydantic model or dataclass).
 
     Claude can use all reasoning but must return a final answer using
     the FinalAnswer tool with data matching the response_model schema.
 
     Args:
         prompt: The user prompt
-        response_model: Pydantic model class for the response
+        response_model: Pydantic BaseModel class, dataclass, or typing type
         system_prompt: Additional system prompt context
         cwd: Working directory
+        status_cb: Optional callback for live status updates
+        postprocess: Optional function to post-process validated result
 
     Returns:
-        Validated instance of response_model
+        Validated instance of response_model (after optional postprocess)
     """
-    # Build JSON Schema from Pydantic model
-    schema = response_model.model_json_schema()
+    # Build JSON Schema and validator for BaseModel or dataclass
+    schema, validate_payload, response_model_name = _make_adapter(response_model)
 
     # Extract only the properties and required fields for the tool schema
     # The tool parameters should match the model's fields directly
@@ -126,7 +152,7 @@ async def query_with_pydantic_response(
         "required": schema.get("required", []),
     }
 
-    final_obj: Optional[ModelT] = None
+    final_obj: Optional[Any] = None
     start_time = time.time()
     agent_messages = []  # Accumulate all agent messages
 
@@ -154,8 +180,8 @@ async def query_with_pydantic_response(
         nonlocal final_obj
         if input_data.get("tool_name") == "mcp__answer__FinalAnswer":
             tool_input = input_data["tool_input"]
-            # Validate directly - tool must return data matching schema exactly
-            final_obj = response_model.model_validate(tool_input)
+            # Validate using TypeAdapter (works for BaseModel or dataclass)
+            final_obj = validate_payload(tool_input)
         return {}
 
     # Block stop until FinalAnswer is called
@@ -184,6 +210,41 @@ async def query_with_pydantic_response(
         # "Do not print the answer in plain text - use the tool."
     )
 
+    # Hook to capture ALL tool usage (not just FinalAnswer)
+    async def capture_all_tools(
+        input_data: dict[str, Any],
+        tool_use_id: str | None,
+        ctx: HookContext,
+    ) -> dict[str, Any]:
+        """Capture all tool executions for status updates."""
+        tool_name = input_data.get("tool_name", "")
+        if status_cb and tool_name:
+            # Extract just the tool name (remove mcp__ prefix if present)
+            display_name = tool_name.split("__")[-1] if "__" in tool_name else tool_name
+            
+            # Try to get tool parameters for better context
+            tool_input = input_data.get("tool_input", {})
+            detail = ""
+            
+            if display_name == "Read" and "path" in tool_input:
+                path_str = tool_input["path"]
+                # Show just filename
+                from pathlib import Path
+                detail = f" {Path(path_str).name}"
+            elif display_name == "Bash" and "cmd" in tool_input:
+                cmd = tool_input["cmd"]
+                # Show first 50 chars
+                detail = f" {cmd[:50]}" + ("..." if len(cmd) > 50 else "")
+            elif display_name == "Glob" and "filePattern" in tool_input:
+                pattern = tool_input["filePattern"]
+                detail = f" {pattern}"
+            elif display_name == "Grep" and "pattern" in tool_input:
+                pattern = tool_input["pattern"]
+                detail = f" {pattern[:40]}" + ("..." if len(pattern) > 40 else "")
+            
+            status_cb(f"tool: {display_name}{detail}")
+        return {}
+
     # Build options
     # Don't use settings parameter - let SDK use defaults but we'll backup .claude.json
     options = ClaudeAgentOptions(
@@ -193,6 +254,7 @@ async def query_with_pydantic_response(
         permission_mode="bypassPermissions",
         cwd=cwd,
         hooks={
+            "PreToolUse": [HookMatcher(hooks=[capture_all_tools])],  # Capture ALL tools
             "PostToolUse": [HookMatcher(matcher="mcp__answer__FinalAnswer", hooks=[capture_final])],
             "Stop": [HookMatcher(hooks=[enforce_final_before_stop])],
         },
@@ -228,6 +290,8 @@ async def query_with_pydantic_response(
                 for block in message.content:
                     if isinstance(block, TextBlock):
                         agent_messages.append({"type": "text", "text": block.text})
+                        if status_cb:
+                            status_cb(f"text: {block.text[:80].strip()}")
                     elif isinstance(block, ThinkingBlock):
                         agent_messages.append(
                             {
@@ -236,6 +300,8 @@ async def query_with_pydantic_response(
                                 "signature": block.signature,
                             }
                         )
+                        if status_cb:
+                            status_cb("thinking...")
                     elif isinstance(block, ToolUseBlock):
                         agent_messages.append(
                             {
@@ -245,20 +311,23 @@ async def query_with_pydantic_response(
                                 "input": block.input,
                             }
                         )
+                        if status_cb:
+                            status_cb(f"tool: {block.name}")
                     elif isinstance(block, ToolResultBlock):
-                        # Limit content to 500 chars for log size
                         content_str = str(block.content) if block.content is not None else ""
                         agent_messages.append(
                             {
                                 "type": "tool_result",
                                 "tool_use_id": block.tool_use_id,
-                                "content": content_str[:500],
+                                "content": content_str,
                                 "is_error": block.is_error,
                             }
                         )
+                        if status_cb:
+                            status_cb("tool result")
             # Log other message types for debugging
             else:
-                agent_messages.append({"type": type(message).__name__, "raw": str(message)[:500]})
+                agent_messages.append({"type": type(message).__name__, "raw": str(message)})
 
     # Log successful call
     duration_ms = (time.time() - start_time) * 1000

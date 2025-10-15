@@ -27,6 +27,7 @@ load_dotenv()
 
 from ..core.ai_analyzer import AIRepoAnalyzer
 from ..config import Profile
+from .live_feed import with_live_agent_feed
 
 # Read version from pyproject.toml
 try:
@@ -54,6 +55,9 @@ app = typer.Typer(
     add_completion=False,
 )
 console = Console()
+
+# CVDP sub-app
+cvdp_app = typer.Typer(help="CVDP-compatible operations")
 
 
 def version_callback(value: bool):
@@ -127,18 +131,16 @@ def ingest(
         else:
             repo_path = Path(repo_url)
         
-        # Run AI analysis
-        with Progress(
-            SpinnerColumn(),
-            TextColumn("[progress.description]{task.description}"),
-            console=console,
-        ) as progress:
-            task = progress.add_task("[cyan]Analyzing repository...", total=None)
-            
-            analyzer = AIRepoAnalyzer(repo_root=repo_path)
-            analysis = await analyzer.analyze()
-            
-            progress.update(task, completed=True)
+        # Run AI analysis with live agent feed
+        analyzer = AIRepoAnalyzer(repo_root=repo_path)
+        analysis = await with_live_agent_feed(
+            analyzer.analyze,
+            console,
+            title="Analyzing Repository",
+            show_progress=False
+        )
+        
+        console.print("[green]✓ Analysis complete![/]")
         
         # Display results in a nice table
         table = Table(title="Analysis Results", show_header=True)
@@ -159,7 +161,38 @@ def ingest(
         
         profile_path = profiles_dir / f"{derived_name}.yaml"
         
-        # Create Profile object
+        # Create Profile object with analysis cache
+        from ..core.models import RepoAnalysis
+        
+        # Convert analysis to dict for caching
+        analysis_cache = {
+            "tests": [
+                {
+                    "name": t.name,
+                    "file_path": str(t.file_path.relative_to(repo_path)),
+                    "base_class": t.base_class,
+                    "description": t.description,
+                }
+                for t in analysis.tests
+            ],
+            "sequences": [
+                {
+                    "name": s.name,
+                    "file_path": str(s.file_path.relative_to(repo_path)),
+                    "base_class": s.base_class,
+                }
+                for s in analysis.sequences
+            ],
+            "covergroups": analysis.covergroups,
+            "build_system": analysis.build_system.value,
+            "detected_simulators": [s.value for s in analysis.detected_simulators],
+            "repo_root": str(repo_path),
+            "tests_dir": str(analysis.tests_dir.relative_to(repo_path)) if analysis.tests_dir else None,
+            "sequences_dir": str(analysis.sequences_dir.relative_to(repo_path)) if analysis.sequences_dir else None,
+            "env_dir": str(analysis.env_dir.relative_to(repo_path)) if analysis.env_dir else None,
+            "agents_dir": str(analysis.agents_dir.relative_to(repo_path)) if analysis.agents_dir else None,
+        }
+        
         profile = Profile(
             name=derived_name,
             repo_url=str(repo_path),
@@ -188,7 +221,7 @@ def ingest(
                 "build_system": analysis.build_system.value,
                 "covergroups": analysis.covergroups,
             },
-            _analysis_cache=None,
+            analysis_cache=analysis_cache,
         )
         
         profile.to_yaml(profile_path)
@@ -203,6 +236,7 @@ def ingest(
 def build(
     name: str = typer.Argument(..., help="Gym name"),
     workspace: Path = typer.Option(Path("./dvsmith_workspace"), help="Workspace directory"),
+    max_tasks: Optional[int] = typer.Option(None, "--max-tasks", "-n", help="Maximum number of tasks to generate"),
     skip_verification: bool = typer.Option(False, "--skip-verify", help="Skip verification step"),
 ):
     """Build a gym from an analyzed profile."""
@@ -210,7 +244,7 @@ def build(
     async def run_build():
         from ..core.gym_cleaner import GymCleaner
         from ..core.task_generator import TaskGenerator
-        from ..core.models import TaskCategory
+        from ..core.models import TaskCategory, RepoAnalysis
         
         console.print(f"[cyan]Building gym:[/] {name}")
         
@@ -223,26 +257,78 @@ def build(
         profile = Profile.from_yaml(profile_path)
         
         # Load cached analysis
-        if not profile._analysis_cache:
+        if not profile.analysis_cache:
             console.print("[red]✗ No cached analysis found. Run 'ingest' first.[/]")
             raise typer.Exit(1)
         
-        console.print(f"[cyan]Repository:[/] {profile.repo_url}")
-        
-        # Import RepoAnalysis to deserialize cache
-        from ..core.models import RepoAnalysis
         repo_path = Path(profile.repo_url)
+        console.print(f"[cyan]Repository:[/] {repo_path}")
         
-        # Reconstruct analysis from cache (simplified)
-        with console.status("[cyan]Setting up gym structure..."):
-            gym_dir = workspace / "gyms" / name
-            gym_dir.mkdir(parents=True, exist_ok=True)
-            
-            tasks_dir = gym_dir / "tasks"
-            tasks_dir.mkdir(exist_ok=True)
+        # Reconstruct analysis from cache
+        analysis = RepoAnalysis.from_dict(profile.analysis_cache, repo_root=repo_path)
         
-        console.print(f"[green]✓ Gym directory:[/] {gym_dir}")
+        # Setup gym structure
+        gym_dir = workspace / "gyms" / name
+        gym_dir.mkdir(parents=True, exist_ok=True)
+        tasks_dir = gym_dir / "tasks"
+        tasks_dir.mkdir(exist_ok=True)
+        
+        console.print(f"[cyan]Gym directory:[/] {gym_dir}")
+        
+        # Generate tasks (with optional limit)
+        task_gen = TaskGenerator(analysis, profile.to_dict())
+        smoke_tests = profile.grading.smoke_tests
+        
+        # Limit number of tasks if specified
+        if max_tasks:
+            # Temporarily reduce test list
+            original_tests = analysis.tests
+            analysis.tests = [t for t in original_tests if t.name not in smoke_tests][:max_tasks]
+        
+        # Use live feed for task generation (shows AI working on each task)
+        task_count_msg = f"{max_tasks} tasks" if max_tasks else f"{len([t for t in analysis.tests if t.name not in smoke_tests])} tasks"
+        console.print(f"[cyan]Generating {task_count_msg}...[/]")
+        
+        tasks = await with_live_agent_feed(
+            task_gen.generate_tasks_async,
+            console,
+            title=f"Generating Tasks (0/{len([t for t in analysis.tests if t.name not in smoke_tests])})",
+            max_messages=3,
+            output_dir=tasks_dir,
+            smoke_tests=smoke_tests
+        )
+        
+        # Restore original tests
+        if max_tasks:
+            analysis.tests = original_tests
+        
+        console.print(f"[green]✓ Generated {len(tasks)} tasks[/]")
+        
+        # Create backups
+        backups_dir = gym_dir / "backups" / "original_tests"
+        backups_dir.mkdir(parents=True, exist_ok=True)
+        
+        with console.status(f"[cyan]Backing up {len(analysis.tests)} test files..."):
+            for test in analysis.tests:
+                if test.file_path.exists():
+                    dest = backups_dir / test.file_path.name
+                    import shutil
+                    shutil.copy2(test.file_path, dest)
+        
+        console.print(f"[green]✓ Backed up test files to:[/] {backups_dir}")
         console.print(f"[green]✓ Build complete![/]")
+        
+        # Show summary table
+        table = Table(title="Gym Summary")
+        table.add_column("Component", style="cyan")
+        table.add_column("Count", style="green", justify="right")
+        
+        table.add_row("Tasks Generated", str(len(tasks)))
+        table.add_row("Tests Backed Up", str(len(analysis.tests)))
+        table.add_row("Sequences", str(len(analysis.sequences)))
+        table.add_row("Gym Location", str(gym_dir))
+        
+        console.print(table)
     
     asyncio.run(run_build())
 
@@ -361,6 +447,47 @@ def info(
                 pass
         
         console.print(table)
+
+
+@cvdp_app.command("export")
+def cvdp_export(
+    repo: Path = typer.Argument(..., help="Repository path"),
+    out: Path = typer.Option(Path("dvsmith_cvdp.jsonl"), "--out", "-o", help="Output JSONL file"),
+    prefer_sim: Optional[str] = typer.Option(None, "--sim", help="Preferred simulator (questa|xcelium|vcs)"),
+):
+    """Export repository analysis to CVDP format."""
+    
+    async def run_export():
+        from ..cvdp.exporter import build_cvdp_items, write_jsonl
+        from ..core.models import Simulator
+        
+        console.print(f"[cyan]Analyzing repository:[/] {repo}")
+        
+        # Use live agent feed utility
+        analyzer = AIRepoAnalyzer(repo_root=repo)
+        analysis = await with_live_agent_feed(
+            analyzer.analyze,
+            console,
+            title="CVDP Analysis",
+            show_progress=False
+        )
+        
+        # Convert to CVDP items
+        sim = Simulator(prefer_sim) if prefer_sim else None
+        items = build_cvdp_items(analysis, prefer=sim)
+        
+        # Write JSONL
+        write_jsonl(items, out)
+        
+        console.print(f"\n[green]✓ Exported {len(items)} CVDP items to:[/] {out}")
+        console.print(f"[cyan]Tests:[/] {len(analysis.tests)}")
+        console.print(f"[cyan]Simulator:[/] {prefer_sim or 'auto-detected'}")
+    
+    asyncio.run(run_export())
+
+
+# Add cvdp sub-app to main app
+app.add_typer(cvdp_app, name="cvdp")
 
 
 def main():

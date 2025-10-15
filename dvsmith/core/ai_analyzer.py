@@ -30,14 +30,18 @@ class AIRepoAnalyzer:
         if not self.repo_root.exists():
             raise ValueError(f"Repository not found: {repo_root}")
 
-    async def analyze(self) -> RepoAnalysis:
+    async def analyze(self, show_progress: bool = True, status_cb: Optional[callable] = None) -> RepoAnalysis:
         """Analyze repository using AI (async).
+
+        Args:
+            show_progress: Show tqdm progress bar (disable if CLI has its own progress)
+            status_cb: Optional callback for live status updates (receives status string)
 
         Returns:
             Complete RepoAnalysis with all discovered elements
         """
-        # Create progress bar for analysis steps
-        with tqdm(total=6, desc="AI Analysis", unit="step", position=1, leave=False) as pbar:
+        # Create progress bar for analysis steps (can be disabled)
+        with tqdm(total=6, desc="AI Analysis", unit="step", position=1, leave=False, disable=not show_progress) as pbar:
             # Step 1: Get directory tree and file list
             pbar.set_description("Gathering file tree")
             file_tree = self._get_file_tree()
@@ -50,12 +54,19 @@ class AIRepoAnalyzer:
 
             # Step 3: Extract test files and analyze them
             pbar.set_description("Analyzing tests")
-            tests = await self._analyze_tests_async_wrapper(dir_info.tests_dir)
+            tests = await self._analyze_tests_async_wrapper(dir_info.tests_dir, status_cb)
             pbar.update(1)
 
             # Step 4: Extract sequence files
             pbar.set_description("Analyzing sequences")
-            sequences = self._analyze_sequences(dir_info.sequences_dir)
+            # Check for sequences_dir, or fallback to tests_dir/sequences/
+            seq_dir = dir_info.sequences_dir
+            if not seq_dir and dir_info.tests_dir:
+                # Check if there's a sequences subdirectory under tests
+                potential_seq = str(Path(dir_info.tests_dir) / "sequences")
+                if (self.repo_root / potential_seq).exists():
+                    seq_dir = potential_seq
+            sequences = self._analyze_sequences(seq_dir)
             pbar.update(1)
 
             # Step 5: Find covergroups
@@ -283,10 +294,10 @@ class AIRepoAnalyzer:
                 agents_dir=None,
             )
         
-        return await self._identify_directories_async(file_tree, test_dir_candidates)
+        return await self._identify_directories_async(file_tree, test_dir_candidates, status_cb)
 
     async def _identify_directories_async(
-        self, file_tree: str, test_dir_candidates: list[dict]
+        self, file_tree: str, test_dir_candidates: list[dict], status_cb=None
     ) -> DirectoryInfo:
         """Use AI to identify key directories (async).
 
@@ -331,6 +342,7 @@ CRITICAL RULES:
                 response_model=DirectoryInfo,
                 system_prompt="You are an expert in SystemVerilog and UVM testbench structure.",
                 cwd=str(self.repo_root),
+                status_cb=status_cb,
             )
 
             # Validate that the tests_dir actually exists
@@ -425,7 +437,7 @@ CRITICAL RULES:
         """
         return asyncio.run(self._find_test_files_with_ai_async(tests_path, dir_tree))
     
-    async def _analyze_tests_async_wrapper(self, tests_dir: Optional[str]) -> list[UVMTest]:
+    async def _analyze_tests_async_wrapper(self, tests_dir: Optional[str], status_cb=None) -> list[UVMTest]:
         """Extract all tests from test directory (async).
 
         Args:
@@ -451,10 +463,12 @@ CRITICAL RULES:
             dir_tree = f"Directory: {tests_dir}"
 
         # Ask AI to identify test files from directory structure
-        test_file_paths = await self._find_test_files_with_ai_async(tests_path, dir_tree)
+        test_file_paths = await self._find_test_files_with_ai_async(tests_path, dir_tree, status_cb)
 
         tests = []
-        for test_file in tqdm(test_file_paths[:100], desc="Analyzing tests", unit="file"):
+        # Use tqdm only in non-CLI contexts (when show_progress would be True)
+        test_files = test_file_paths[:100]
+        for test_file in tqdm(test_files, desc="Analyzing tests", unit="file", disable=True):
             try:
                 content = test_file.read_text()[:5000]
                 if "extends" not in content or "class" not in content:
@@ -467,7 +481,7 @@ CRITICAL RULES:
 
         return tests
 
-    async def _find_test_files_with_ai_async(self, tests_path: Path, dir_tree: str) -> list[Path]:
+    async def _find_test_files_with_ai_async(self, tests_path: Path, dir_tree: str, status_cb=None) -> list[Path]:
         """Use AI to identify test files from directory tree (async).
 
         Args:
@@ -477,27 +491,22 @@ CRITICAL RULES:
         Returns:
             List of Path objects to test files
         """
-        prompt = f"""Analyze this UVM test directory structure and identify ALL test class files.
+        prompt = f"""Explore the test directory at {tests_path} and identify ALL UVM test class files.
 
-Directory tree:
-```
-{dir_tree}
-```
+Use your tools to:
+1. List files in the directory (use Glob or Bash)
+2. Identify which are test files (look for .sv files)
+3. Exclude sequence files (contain "seq" or "sequence")
+4. Exclude package files (*pkg.sv, *package*.sv)
 
 IMPORTANT:
-- Include ANY .sv files that might contain UVM test classes
-- Test files can have ANY naming convention (PascalCase, snake_case, etc.):
-  - Examples: SpiDualSpiTypeTest.sv, apb_8b_write_test.sv, my_test_case.sv
-- EXCLUDE sequence files (contain "seq" or "sequence" in name or path)
-- EXCLUDE package files (*pkg.sv, *package*.sv)
-- EXCLUDE files in "sequences" or "seq" directories
-- When in doubt, include the file (we verify contents later)
+- Use tools to explore - don't guess
+- Test files can have ANY naming convention
+- Include files that likely contain UVM test classes (extend uvm_test or *Test)
+- When in doubt, include the file
 
-Return format (STRICT):
-- Call the FinalAnswer tool with a JSON OBJECT of the exact shape:
-  {{"kind": "dvsmith.files.v1", "files": ["apb_8b_write_test.sv", "apb_16b_read_test.sv"]}}
-- Do NOT include any other properties.
-- The "kind" field must be exactly "dvsmith.files.v1".
+Return format via FinalAnswer tool:
+{{"kind": "dvsmith.files.v1", "files": ["test1.sv", "test2.sv", ...]}}
 """
 
         try:
@@ -506,6 +515,7 @@ Return format (STRICT):
                 response_model=FilesEnvelope,
                 system_prompt="You are an expert in UVM directory structures.",
                 cwd=str(tests_path.resolve()),
+                status_cb=status_cb,
             )
 
             file_paths = result.files

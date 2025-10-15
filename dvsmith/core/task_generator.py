@@ -55,7 +55,7 @@ class TaskGenerator:
         return asyncio.run(self.generate_tasks_async(output_dir, smoke_tests))
 
     async def generate_tasks_async(
-        self, output_dir: Path, smoke_tests: Optional[list[str]] = None
+        self, output_dir: Path, smoke_tests: Optional[list[str]] = None, status_cb=None
     ) -> list[TaskSpec]:
         """Generate task specifications for all tests in parallel.
 
