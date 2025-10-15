@@ -276,9 +276,91 @@ def build(
         
         console.print(f"[cyan]Gym directory:[/] {gym_dir}")
         
+        # Copy repository structure to gym
+        with console.status("[cyan]Copying repository structure..."):
+            import shutil
+            
+            # Copy source directories
+            for src_dir in ['src', 'rtl', 'tb', 'sim']:
+                src_path = repo_path / src_dir
+                if src_path.exists():
+                    dest_path = gym_dir / src_dir
+                    if dest_path.exists():
+                        shutil.rmtree(dest_path)
+                    shutil.copytree(src_path, dest_path, symlinks=False, ignore=shutil.ignore_patterns('*.log', '*.vcd', 'work', '*.ucdb'))
+            
+            # Copy build files
+            for build_file in ['Makefile', 'makefile', 'CMakeLists.txt']:
+                build_path = repo_path / build_file
+                if build_path.exists():
+                    shutil.copy2(build_path, gym_dir / build_file)
+        
+        console.print(f"[green]✓ Copied repository structure[/]")
+        
+        # Prepare for task generation and cleaning
+        smoke_tests = profile.grading.smoke_tests
+        
+        # Clean test directory using Claude (keep infrastructure, remove task tests)
+        from pydantic import BaseModel, Field
+        
+        class CleanupPlan(BaseModel):
+            """Plan for cleaning test directory."""
+            keep: list[str] = Field(default_factory=list, description="Files to keep (infrastructure)")
+            remove: list[str] = Field(default_factory=list, description="Files to remove (task tests)")
+            
+        # Get list of tests that will become tasks
+        task_test_names = [t.name for t in analysis.tests if t.name not in smoke_tests and "base" not in t.name.lower()]
+        if max_tasks:
+            task_test_names = task_test_names[:max_tasks]
+        
+        console.print(f"[cyan]Analyzing which files to clean ({len(task_test_names)} task tests)...[/]")
+        
+        # Use Claude to decide what to keep/remove
+        cleanup_prompt = f"""You are helping prepare a UVM verification gym by cleaning the test directory.
+
+Repository: {repo_path}
+Test directory: {analysis.tests_dir}
+
+Tests that will become TASKS (should be REMOVED from gym):
+{chr(10).join(f"  - {name}" for name in task_test_names[:20])}
+
+Smoke tests (must be KEPT):
+{chr(10).join(f"  - {name}" for name in smoke_tests)}
+
+Your job:
+1. Identify which test files should be REMOVED (the task tests above)
+2. Identify which files should be KEPT (base tests, packages, infrastructure)
+
+Return CleanupPlan with:
+- keep: List of filenames to preserve (base_test.sv, *_pkg.sv, etc.)
+- remove: List of filenames to delete (task test files)
+
+Work from the test directory: {gym_dir / analysis.tests_dir.relative_to(repo_path) if analysis.tests_dir else gym_dir}
+"""
+        
+        # Call Claude directly (not via with_live_agent_feed since it's quick)
+        with console.status("[cyan]Planning cleanup with Claude..."):
+            from ..core.ai_structured import query_with_pydantic_response
+            cleanup_plan = await query_with_pydantic_response(
+                prompt=cleanup_prompt,
+                response_model=CleanupPlan,
+                system_prompt="You are an expert at UVM testbench structure.",
+                cwd=str(gym_dir)
+            )
+        
+        # Execute cleanup
+        test_dir_in_gym = gym_dir / analysis.tests_dir.relative_to(repo_path) if analysis.tests_dir else None
+        if test_dir_in_gym and test_dir_in_gym.exists():
+            removed_count = 0
+            for filename in cleanup_plan.remove:
+                test_file = test_dir_in_gym / filename
+                if test_file.exists():
+                    test_file.unlink()
+                    removed_count += 1
+            console.print(f"[green]✓ Removed {removed_count} task test files, kept {len(cleanup_plan.keep)} infrastructure files[/]")
+        
         # Generate tasks (with optional limit)
         task_gen = TaskGenerator(analysis, profile.to_dict())
-        smoke_tests = profile.grading.smoke_tests
         
         # Limit number of tasks if specified
         if max_tasks:
