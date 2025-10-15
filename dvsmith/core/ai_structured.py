@@ -9,6 +9,9 @@ from pathlib import Path
 from typing import Type, TypeVar, Optional, Any
 from pydantic import BaseModel
 
+from filelock import FileLock
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+
 from claude_agent_sdk import (
     ClaudeSDKClient,
     ClaudeAgentOptions,
@@ -75,13 +78,22 @@ def log_ai_call(
             "messages": messages or [],
         }
 
-        with AI_LOG_FILE.open("a") as f:
-            f.write(json.dumps(log_entry) + "\n")
+        # Use file lock to prevent concurrent writes
+        lock_file = AI_LOG_FILE.with_suffix(".lock")
+        with FileLock(lock_file, timeout=10):
+            with AI_LOG_FILE.open("a") as f:
+                f.write(json.dumps(log_entry) + "\n")
     except Exception as e:
         # Don't fail if logging fails
         logger.warning(f"Failed to log AI call: {e}")
 
 
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=2, max=10),
+    retry=retry_if_exception_type((ConnectionError, TimeoutError)),
+    reraise=True,
+)
 async def query_with_pydantic_response(
     prompt: str,
     response_model: Type[ModelT],

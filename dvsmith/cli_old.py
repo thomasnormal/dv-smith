@@ -161,8 +161,9 @@ class DVSmith:
             # Step 1: AI analysis
             pbar.set_description("Analyzing repository")
             try:
+                import asyncio
                 ai_analyzer = AIRepoAnalyzer(repo_path)
-                analysis = ai_analyzer.analyze()
+                analysis = asyncio.run(ai_analyzer.analyze())
                 pbar.update(1)
 
                 logger.info(f"✓ Found {len(analysis.tests)} tests")
@@ -256,13 +257,13 @@ class DVSmith:
                 logger.warning(f"Cache load failed: {e}")
                 logger.info("Re-analyzing repository...")
                 ai_analyzer = AIRepoAnalyzer(repo_path)
-                analysis = ai_analyzer.analyze()
+                analysis = asyncio.run(ai_analyzer.analyze())
         else:
             # No cache, need to analyze
             logger.info("No cached analysis found, analyzing repository...")
             try:
                 ai_analyzer = AIRepoAnalyzer(repo_path)
-                analysis = ai_analyzer.analyze()
+                analysis = asyncio.run(ai_analyzer.analyze())
             except Exception as e:
                 logger.error(f"AI analysis failed: {e}")
                 logger.error("Please check your ANTHROPIC_API_KEY and try again")

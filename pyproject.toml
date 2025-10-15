@@ -3,11 +3,11 @@ requires = ["setuptools>=45", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-packages = ["dvsmith", "dvsmith.core", "dvsmith.adapters", "dvsmith.adapters.sim", "dvsmith.adapters.cov", "dvsmith.adapters.parse", "dvsmith.harness"]
+packages = ["dvsmith", "dvsmith.cli", "dvsmith.config", "dvsmith.core", "dvsmith.adapters", "dvsmith.adapters.sim", "dvsmith.adapters.cov", "dvsmith.adapters.parse", "dvsmith.harness"]
 
 [project]
 name = "dv-smith"
-version = "0.1.0"
+version = "0.2.0"
 description = "Convert SystemVerilog/UVM testbenches into DV gyms"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -35,6 +35,11 @@ dependencies = [
     "anthropic>=0.18.0",
     "tqdm>=4.65.0",
     "pydantic>=2.0.0",
+    "pydantic-settings>=2.0.0",
+    "typer>=0.9.0",
+    "rich>=13.0.0",
+    "tenacity>=8.0.0",
+    "filelock>=3.0.0",
 ]
 
 [project.optional-dependencies]
@@ -47,7 +52,8 @@ dev = [
 ]
 
 [project.scripts]
-dvsmith = "dvsmith.cli:main"
+dvsmith = "dvsmith.cli.app:main"
+dvsmith-old = "dvsmith.cli_old:main"
 
 [tool.black]
 line-length = 100

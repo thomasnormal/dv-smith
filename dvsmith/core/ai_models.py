@@ -60,6 +60,70 @@ class BuildInfo(BaseModel):
     )
 
 
+class UVMTestMetadata(BaseModel):
+    """Complete metadata for a single UVM test."""
+    
+    model_config = ConfigDict(extra="ignore")  # Tolerate extra fields
+    
+    name: str = Field(description="Name of the test class")
+    file_path: str = Field(description="Relative path from repo root to test file")
+    base_class: str = Field(default="uvm_test", description="Base class this test extends")
+    description: str = Field(default="", description="Brief description of what this test does")
+
+
+class UVMSequenceMetadata(BaseModel):
+    """Complete metadata for a single UVM sequence."""
+    
+    model_config = ConfigDict(extra="ignore")  # Tolerate extra fields
+    
+    name: str = Field(description="Name of the sequence class")
+    file_path: str = Field(description="Relative path from repo root to sequence file")
+    base_class: str = Field(default="uvm_sequence", description="Base class this sequence extends")
+
+
+class CompleteRepoAnalysis(BaseModel):
+    """Complete repository analysis in a single AI response."""
+    
+    # Directory structure
+    tests_dir: Optional[str] = Field(
+        None, description="Path to directory containing UVM test classes (relative to repo root)"
+    )
+    sequences_dir: Optional[str] = Field(
+        None, description="Path to directory containing UVM sequences (relative to repo root)"
+    )
+    env_dir: Optional[str] = Field(
+        None, description="Path to UVM environment directory (relative to repo root)"
+    )
+    agents_dir: Optional[str] = Field(
+        None, description="Path to UVM agents directory (relative to repo root)"
+    )
+    
+    # Test and sequence metadata
+    tests: list[UVMTestMetadata] = Field(
+        default_factory=list,
+        description="List of all UVM test classes found in the repository"
+    )
+    sequences: list[UVMSequenceMetadata] = Field(
+        default_factory=list,
+        description="List of all UVM sequence classes found in the repository"
+    )
+    
+    # Covergroup information
+    covergroups: list[str] = Field(
+        default_factory=list,
+        description="List of covergroup names in format 'ClassName.covergroupName'"
+    )
+    
+    # Build system information
+    build_system: str = Field(
+        description="Type of build system: makefile, cmake, fusesoc, dvsim, or custom"
+    )
+    simulators: list[str] = Field(
+        default_factory=list,
+        description="List of detected simulators: questa, modelsim, xcelium, irun, vcs, verilator, dsim"
+    )
+
+
 # Task generator response models
 
 

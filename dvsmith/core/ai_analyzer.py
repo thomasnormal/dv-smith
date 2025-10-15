@@ -30,8 +30,8 @@ class AIRepoAnalyzer:
         if not self.repo_root.exists():
             raise ValueError(f"Repository not found: {repo_root}")
 
-    def analyze(self) -> RepoAnalysis:
-        """Analyze repository using AI.
+    async def analyze(self) -> RepoAnalysis:
+        """Analyze repository using AI (async).
 
         Returns:
             Complete RepoAnalysis with all discovered elements
@@ -45,12 +45,12 @@ class AIRepoAnalyzer:
 
             # Step 2: Use AI to identify key directories
             pbar.set_description("Identifying directories")
-            dir_info = self._identify_directories(file_tree)
+            dir_info = await self._identify_directories_async_wrapper(file_tree)
             pbar.update(1)
 
             # Step 3: Extract test files and analyze them
             pbar.set_description("Analyzing tests")
-            tests = self._analyze_tests(dir_info.tests_dir)
+            tests = await self._analyze_tests_async_wrapper(dir_info.tests_dir)
             pbar.update(1)
 
             # Step 4: Extract sequence files
@@ -65,7 +65,7 @@ class AIRepoAnalyzer:
 
             # Step 6: Detect build system and simulators
             pbar.set_description("Detecting build system")
-            build_info = self._detect_build_system()
+            build_info = await self._detect_build_system_async_wrapper()
             pbar.update(1)
 
             # Construct analysis
@@ -215,8 +215,75 @@ class AIRepoAnalyzer:
                 agents_dir=None,
             )
 
-        # Call async version
+        # Call async version via wrapper
         return asyncio.run(self._identify_directories_async(file_tree, test_dir_candidates))
+
+    async def _identify_directories_async_wrapper(self, file_tree: str) -> DirectoryInfo:
+        """Async wrapper for directory identification.
+        
+        Args:
+            file_tree: File tree string
+            
+        Returns:
+            DirectoryInfo object
+        """
+        # Find test directory candidates
+        test_dir_candidates = []
+        dirs_checked = 0
+        for path in self.repo_root.rglob("*"):
+            if path.is_dir() and ("test" in path.name.lower() or "Test" in path.name):
+                dirs_checked += 1
+                if dirs_checked > 50:
+                    break
+                try:
+                    rel = path.relative_to(self.repo_root)
+                    sv_files = list(path.rglob("*.sv"))[:200]
+                    if not sv_files:
+                        continue
+                    
+                    test_files = []
+                    for sv_file in sv_files:
+                        try:
+                            content = sv_file.read_text(encoding="utf-8", errors="ignore")[:3000]
+                            content_lower = content.lower()
+                            has_class_extends = bool(
+                                re.search(r"class\s+\w+\s+extends\s+([a-zA-Z_][\w:#]*)", content, re.I)
+                            )
+                            is_test = has_class_extends and (
+                                "uvm_test" in content_lower
+                                or bool(re.search(r"extends\s+\w*_test\b", content, re.I))
+                            )
+                            if is_test:
+                                test_files.append(sv_file)
+                        except:
+                            pass
+                    
+                    if test_files:
+                        samples = [f.name for f in test_files[:3]]
+                        priority = "HIGH" if "src" in str(rel) or "hvl" in str(rel) else "LOW"
+                        test_dir_candidates.append({
+                            "path": str(rel),
+                            "count": len(test_files),
+                            "samples": samples,
+                            "priority": priority,
+                        })
+                        if len(test_dir_candidates) >= 10:
+                            break
+                except:
+                    pass
+        
+        test_dir_candidates.sort(key=lambda x: (x["priority"] == "LOW", -x["count"]))
+        
+        if len(test_dir_candidates) == 1:
+            logger.info(f"[AI Analyzer] Found single test directory: {test_dir_candidates[0]['path']}")
+            return DirectoryInfo(
+                tests_dir=test_dir_candidates[0]["path"],
+                sequences_dir=None,
+                env_dir=None,
+                agents_dir=None,
+            )
+        
+        return await self._identify_directories_async(file_tree, test_dir_candidates)
 
     async def _identify_directories_async(
         self, file_tree: str, test_dir_candidates: list[dict]
@@ -357,6 +424,48 @@ CRITICAL RULES:
             List of Path objects to test files
         """
         return asyncio.run(self._find_test_files_with_ai_async(tests_path, dir_tree))
+    
+    async def _analyze_tests_async_wrapper(self, tests_dir: Optional[str]) -> list[UVMTest]:
+        """Extract all tests from test directory (async).
+
+        Args:
+            tests_dir: Path to test directory (relative to repo root)
+
+        Returns:
+            List of UVMTest objects
+        """
+        if not tests_dir:
+            return []
+
+        tests_path = self.repo_root / tests_dir
+        if not tests_path.exists():
+            return []
+
+        # Get full directory tree for AI to analyze
+        try:
+            result = subprocess.run(
+                ["ls", "-R", str(tests_path)], capture_output=True, text=True, timeout=10
+            )
+            dir_tree = result.stdout[:2000]
+        except:
+            dir_tree = f"Directory: {tests_dir}"
+
+        # Ask AI to identify test files from directory structure
+        test_file_paths = await self._find_test_files_with_ai_async(tests_path, dir_tree)
+
+        tests = []
+        for test_file in tqdm(test_file_paths[:100], desc="Analyzing tests", unit="file"):
+            try:
+                content = test_file.read_text()[:5000]
+                if "extends" not in content or "class" not in content:
+                    continue
+                test_info = self._extract_test_info(test_file, content)
+                if test_info:
+                    tests.append(test_info)
+            except Exception as e:
+                logger.warning(f"[AI Analyzer] Warning: Could not analyze {test_file.name}: {e}")
+
+        return tests
 
     async def _find_test_files_with_ai_async(self, tests_path: Path, dir_tree: str) -> list[Path]:
         """Use AI to identify test files from directory tree (async).
@@ -685,6 +794,46 @@ If this IS a valid UVM test class, extract:
 
         # Call async version
         return asyncio.run(self._detect_build_system_async(build_content, detected_sims))
+    
+    async def _detect_build_system_async_wrapper(self) -> dict[str, Any]:
+        """Detect build system and simulators using AI + regex fallback (async wrapper).
+
+        Returns:
+            Dictionary with build_system and simulators
+        """
+        # Find build files
+        build_files = []
+        for pattern in ["Makefile", "makefile", "*.mk", "*.f", "compile.f"]:
+            build_files.extend(list(self.repo_root.glob(f"**/{pattern}"))[:5])
+
+        if not build_files:
+            return {"build_system": BuildSystem.CUSTOM, "simulators": []}
+
+        # Read build files and do regex detection as fallback
+        build_content = ""
+        detected_sims = set()
+
+        for bf in build_files[:5]:
+            try:
+                content = bf.read_text()[:3000]
+                build_content += f"\n--- {bf.name} ---\n{content}\n"
+
+                # Regex fallback for simulators
+                if re.search(r"\b(vsim|questa|modelsim)\b", content, re.IGNORECASE):
+                    detected_sims.add("questa")
+                if re.search(r"\b(xrun|irun|xcelium|ncsim)\b", content, re.IGNORECASE):
+                    detected_sims.add("xcelium")
+                if re.search(r"\b(vcs|simv)\b", content, re.IGNORECASE):
+                    detected_sims.add("vcs")
+                if re.search(r"\bverilator\b", content, re.IGNORECASE):
+                    detected_sims.add("verilator")
+                if re.search(r"\bdsim\b", content, re.IGNORECASE):
+                    detected_sims.add("dsim")
+            except:
+                pass
+
+        # Call async version
+        return await self._detect_build_system_async(build_content, detected_sims)
 
     async def _detect_build_system_async(
         self, build_content: str, detected_sims: set[str]

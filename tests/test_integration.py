@@ -5,7 +5,8 @@ from pathlib import Path
 
 import pytest
 from dotenv import load_dotenv
-from dvsmith.cli import DVSmith
+import asyncio
+from dvsmith.cli_old import DVSmith
 from dvsmith.core.models import Simulator
 
 # Load environment variables from .env file
@@ -122,7 +123,7 @@ def test_ai_analyzer_finds_tests(test_repo) -> None:
     from dvsmith.core.ai_analyzer import AIRepoAnalyzer
 
     analyzer = AIRepoAnalyzer(test_repo)
-    analysis = analyzer.analyze()
+    analysis = asyncio.run(analyzer.analyze())
 
     # Check that analysis completed
     assert analysis is not None
@@ -147,7 +148,7 @@ def test_ai_analyzer_detects_simulators(test_repo) -> None:
     from dvsmith.core.ai_analyzer import AIRepoAnalyzer
 
     analyzer = AIRepoAnalyzer(test_repo)
-    analysis = analyzer.analyze()
+    analysis = asyncio.run(analyzer.analyze())
 
     # Check we get Simulator enum values
     assert isinstance(analysis.detected_simulators, list)

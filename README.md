@@ -28,10 +28,7 @@ DV-Smith is a **DV gym generator** that:
 ### Prerequisites
 
 - Python 3.10+
-- One or more EDA simulators:
-  - Cadence Xcelium
-  - Mentor Questa/ModelSim
-  - Synopsys VCS
+- Cadence Xcelium
 
 ### Installation
 
@@ -62,9 +59,6 @@ dvsmith ingest https://github.com/mbits-mirafra/apb_avip
 
 # 2. Build the gym (single simulator)
 dvsmith build apb_avip --sim xcelium
-
-# Or build with multiple simulators
-dvsmith build apb_avip --sim xcelium,questa
 
 # 3. Explore tasks
 ls dvsmith_workspace/gyms/apb_avip/tasks/
