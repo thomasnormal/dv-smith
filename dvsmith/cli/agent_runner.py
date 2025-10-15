@@ -36,8 +36,8 @@ async def run_agent_with_feed(
     # Create output directory
     output_dir.mkdir(parents=True, exist_ok=True)
     
-    # Prepare command
-    cmd = ["python3", str(agent_script), str(task_file), str(output_dir)]
+    # Prepare command (unbuffered output)
+    cmd = ["python3", "-u", str(agent_script), str(task_file), str(output_dir)]
     
     console.print(f"[cyan]Running agent:[/] {agent_script.name}")
     console.print(f"[cyan]Task:[/] {task_file.name}")
@@ -72,28 +72,42 @@ async def run_agent_with_feed(
         )
         
         # Stream output
+        line_count = 0
+        last_update = asyncio.get_event_loop().time()
+        
         while True:
-            line = await process.stdout.readline()
+            try:
+                line = await asyncio.wait_for(process.stdout.readline(), timeout=2.0)
+            except asyncio.TimeoutError:
+                # Update display even without new lines (shows progress)
+                current_time = asyncio.get_event_loop().time()
+                if current_time - last_update > 5:
+                    messages.append(f"[dim]Running... ({line_count} lines processed)[/dim]")
+                    update_display()
+                    last_update = current_time
+                continue
+            
             if not line:
                 break
             
             line_text = line.decode('utf-8', errors='ignore').strip()
+            line_count += 1
             
             if not line_text:
                 continue
             
-            # Parse interesting lines
-            if any(keyword in line_text for keyword in ['[Claude', 'Task', 'Working', 'Generated', 'Error', 'Success']):
-                # Clean up the line for display
-                display_line = line_text
-                # Remove ANSI codes if present
-                display_line = re.sub(r'\x1b\[[0-9;]*m', '', display_line)
-                # Truncate if too long
-                if len(display_line) > 90:
-                    display_line = display_line[:87] + "..."
-                
-                messages.append(display_line)
-                update_display()
+            # Show ALL lines (not just filtered) but limit display
+            # Clean up the line for display
+            display_line = line_text
+            # Remove ANSI codes if present
+            display_line = re.sub(r'\x1b\[[0-9;]*m', '', display_line)
+            # Truncate if too long
+            if len(display_line) > 90:
+                display_line = display_line[:87] + "..."
+            
+            messages.append(display_line)
+            update_display()
+            last_update = asyncio.get_event_loop().time()
         
         # Wait for process to complete
         await process.wait()
