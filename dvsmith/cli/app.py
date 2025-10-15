@@ -348,6 +348,11 @@ Explore files and decide what to keep vs remove.
                 cwd=str(gym_dir)
             )
         
+        # Debug: Show what Claude returned
+        console.print(f"[dim]Claude identified {len(cleanup_plan.keep)} files to keep, {len(cleanup_plan.remove)} to remove[/]")
+        if cleanup_plan.remove:
+            console.print(f"[dim]Will remove: {', '.join(cleanup_plan.remove[:3])}...[/]")
+        
         # Execute cleanup
         if analysis.tests_dir:
             # tests_dir might be absolute or relative
@@ -358,14 +363,20 @@ Explore files and decide what to keep vs remove.
             test_dir_in_gym = gym_dir / test_dir_rel
         else:
             test_dir_in_gym = None
+            
         if test_dir_in_gym and test_dir_in_gym.exists():
+            console.print(f"[dim]Cleaning directory: {test_dir_in_gym}[/]")
             removed_count = 0
             for filename in cleanup_plan.remove:
                 test_file = test_dir_in_gym / filename
+                console.print(f"[dim]  Checking {filename}: exists={test_file.exists()}[/]")
                 if test_file.exists():
                     test_file.unlink()
                     removed_count += 1
+                    console.print(f"[dim]    ✓ Removed[/]")
             console.print(f"[green]✓ Removed {removed_count} task test files, kept {len(cleanup_plan.keep)} infrastructure files[/]")
+        else:
+            console.print(f"[yellow]⚠ Test directory not found in gym: {test_dir_in_gym}[/]")
         
         # Generate tasks (with optional limit)
         task_gen = TaskGenerator(analysis, profile.to_dict())
