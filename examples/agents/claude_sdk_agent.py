@@ -226,15 +226,17 @@ class ClaudeSDKAgent:
             test_file = output_dir / f"{class_name}.sv"
             test_file.write_text(test_code)
             print(f"[Claude SDK Agent] Generated test: {test_file}")
-            return [str(test_file)], output_dir
+            # Return path relative to output_dir, use output_dir as root
+            return [f"{class_name}.sv"], output_dir
 
         # Fallback: generate a basic test manually
         print(
             "[Claude SDK Agent] Warning: Could not extract code, generating fallback..."
         )
-        test_file = output_dir / f"{self.task_spec['id']}_test.sv"
+        filename = f"{self.task_spec['id']}_test.sv"
+        test_file = output_dir / filename
         test_file.write_text(self._generate_fallback_test())
-        return [str(test_file)], output_dir
+        return [filename], output_dir
 
     def _build_prompt(self) -> str:
         """Build a comprehensive prompt for Claude."""
@@ -441,9 +443,6 @@ async def main_async() -> None:
         for f in modified_files:
             print(f"  - {f}")
         print(f"Patch file: {patch_file}")
-        print()
-        print("Next steps:")
-        print(f"  dvsmith eval --task {task_file} --patch {patch_file}")
 
     except Exception as e:
         print(f"\nError: {e}")

@@ -117,8 +117,16 @@ async def run_agent_with_feed(
         
         # Check for output files
         patch_files = list(output_dir.glob("*.patch"))
+        sv_files = list(output_dir.glob("*.sv"))
+        
         if patch_files:
             console.print(f"[green]✓ Solution patch:[/] {patch_files[0]}")
+        if sv_files:
+            console.print(f"[green]✓ Generated files:[/] {len(sv_files)} .sv file(s)")
+        
+        # Show next steps
+        console.print("\n[cyan]Next steps:[/]")
+        console.print(f"  dvsmith eval --task {task_file} --patch {output_dir}/solution.patch")
     else:
         console.print(f"\n[red]✗ Agent failed with exit code {return_code}[/]")
     
