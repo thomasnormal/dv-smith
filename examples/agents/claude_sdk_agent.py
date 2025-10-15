@@ -20,9 +20,12 @@ try:
     from claude_agent_sdk import (
         ClaudeSDKClient,
         ClaudeAgentOptions,
+    )
+    from claude_agent_sdk.types import (
         AssistantMessage,
         TextBlock,
         ToolUseBlock,
+        ThinkingBlock,
     )
 except ImportError:
     print("Error: claude-agent-sdk not installed")
@@ -126,22 +129,39 @@ class ClaudeSDKAgent:
 
             # Process responses to extract generated code and track file modifications
             async for message in client.receive_response():
-                # Print to stdout for live feed
-                print(f"[Agent] Processing message: {type(message).__name__}", flush=True)
                 if isinstance(message, AssistantMessage):
                     for block in message.content:
-                        # Report tool usage to stdout
-                        if hasattr(block, '__class__'):
-                            print(f"[Agent] Block type: {block.__class__.__name__}", flush=True)
                         if isinstance(block, TextBlock):
+                            # Show what Claude is saying
+                            text_preview = block.text[:100].replace('\n', ' ')
+                            print(f"💬 Claude: {text_preview}...", flush=True)
+                            
                             # Extract code from response if present
                             if "```systemverilog" in block.text:
                                 code = block.text.split("```systemverilog")[1].split(
                                     "```"
                                 )[0]
                                 test_code += code.strip()
+                                print(f"📝 Generated SystemVerilog code", flush=True)
+                        elif isinstance(block, ThinkingBlock):
+                            print(f"💭 Thinking...", flush=True)
                         elif isinstance(block, ToolUseBlock):
-                            print(f"[Agent] Tool used: {block.name}", flush=True)
+                            # Show which tool and what it's doing
+                            if block.name == "Read":
+                                path = block.input.get("path", "?")
+                                print(f"🔧 Read: {Path(path).name}", flush=True)
+                            elif block.name == "Write":
+                                path = block.input.get("file_path", "?")
+                                print(f"✍️  Write: {Path(path).name}", flush=True)
+                            elif block.name == "Edit":
+                                path = block.input.get("path", "?")
+                                print(f"✏️  Edit: {Path(path).name}", flush=True)
+                            elif block.name == "Glob":
+                                pattern = block.input.get("filePattern", "?")
+                                print(f"🔍 Glob: {pattern}", flush=True)
+                            else:
+                                print(f"🔧 Tool: {block.name}", flush=True)
+                            
                             if block.name == "Write":
                                 # Claude wrote a file
                                 file_path = block.input.get("file_path", "")
