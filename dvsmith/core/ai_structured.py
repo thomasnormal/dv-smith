@@ -296,7 +296,13 @@ async def query_with_pydantic_response(
                                 if path_str:
                                     detail = f": {pathlib.Path(path_str).name}"
                             elif tool_name == "Bash":
-                                cmd = block.input.get("cmd", "")
+                                # Try different key names for Bash command
+                                cmd = block.input.get("cmd") or block.input.get("command") or block.input.get("bash_command", "")
+                                if not cmd and block.input:
+                                    # Fallback: use first value if it looks like a command
+                                    first_val = list(block.input.values())[0] if block.input.values() else ""
+                                    if isinstance(first_val, str) and len(first_val) < 200:
+                                        cmd = first_val
                                 if cmd:
                                     detail = f": {cmd[:40]}" + ("..." if len(cmd) > 40 else "")
                             elif tool_name == "Glob":
