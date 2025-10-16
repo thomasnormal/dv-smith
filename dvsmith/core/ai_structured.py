@@ -326,14 +326,14 @@ async def query_with_pydantic_response(
                         )
                         if status_cb:
                             # Show tool with details from actual input
+                            from pathlib import Path as PathLib
                             tool_name = block.name
                             detail = ""
                             
                             if tool_name == "Read" and block.input:
                                 path_str = block.input.get("path", "")
                                 if path_str:
-                                    from pathlib import Path
-                                    detail = f": {Path(path_str).name}"
+                                    detail = f": {PathLib(path_str).name}"
                             elif tool_name == "Bash" and block.input:
                                 cmd = block.input.get("cmd", "")
                                 if cmd:
