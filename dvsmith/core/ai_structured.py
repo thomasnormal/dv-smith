@@ -3,29 +3,32 @@
 import json
 import logging
 import os
+import shutil
 import time
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Type, TypeVar, Optional, Any, Callable
+from typing import Any, Callable, Iterator, Optional, Tuple
+
 from pydantic import BaseModel, TypeAdapter
 
 from filelock import FileLock
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 from claude_agent_sdk import (
-    ClaudeSDKClient,
     ClaudeAgentOptions,
-    tool,
-    create_sdk_mcp_server,
-    HookMatcher,
+    ClaudeSDKClient,
     HookContext,
+    HookMatcher,
+    create_sdk_mcp_server,
+    tool,
 )
 from claude_agent_sdk.types import (
     AssistantMessage,
     TextBlock,
     ThinkingBlock,
-    ToolUseBlock,
     ToolResultBlock,
+    ToolUseBlock,
 )
 
 # Configure logging and enable Anthropic SDK debug logging if needed
@@ -38,10 +41,28 @@ if os.getenv("DVSMITH_DEBUG", "").lower() in ("1", "true", "yes"):
     logging.getLogger("anthropic").setLevel(logging.DEBUG)
     logging.getLogger("httpx").setLevel(logging.DEBUG)
 
-ModelT = TypeVar("ModelT", bound=BaseModel)
-
 # AI call log file path
 AI_LOG_FILE = Path.home() / ".dvsmith" / "ai_calls.jsonl"
+
+
+@contextmanager
+def temporarily_override_claude_config(config: dict[str, Any]) -> Iterator[None]:
+    """Temporarily replace ~/.claude.json with the provided config."""
+    claude_path = Path.home() / ".claude.json"
+    backup_path = Path.home() / ".claude.json.dvsmith_backup"
+    try:
+        if claude_path.exists():
+            shutil.move(str(claude_path), str(backup_path))
+        claude_path.write_text(json.dumps(config))
+        yield
+    finally:
+        try:
+            if claude_path.exists():
+                claude_path.unlink()
+            if backup_path.exists():
+                shutil.move(str(backup_path), str(claude_path))
+        except Exception as exc:  # pragma: no cover - best effort cleanup
+            logger.warning("Failed to restore Claude config: %s", exc)
 
 
 def log_ai_call(
@@ -88,7 +109,7 @@ def log_ai_call(
         logger.warning(f"Failed to log AI call: {e}")
 
 
-def _make_adapter(model: type):
+def _make_adapter(model: Any) -> Tuple[dict[str, Any], Callable[[Any], Any], str]:
     """Create schema, validator, and name for BaseModel or dataclass/typing types.
     
     Args:
@@ -98,16 +119,125 @@ def _make_adapter(model: type):
         Tuple of (schema dict, validation function, model name)
     """
     if isinstance(model, type) and issubclass(model, BaseModel):
-        schema = model.model_json_schema()
-        validate = lambda data: model.model_validate(data)
+        schema: dict[str, Any] = model.model_json_schema()
+
+        def validate(data: Any) -> Any:
+            return model.model_validate(data)
+
         model_name = model.__name__
     else:
         # Use TypeAdapter for dataclasses and other types
         ta = TypeAdapter(model)
         schema = ta.json_schema()
-        validate = lambda data: ta.validate_python(data)
+
+        def validate(data: Any) -> Any:
+            return ta.validate_python(data)
+
         model_name = getattr(model, "__name__", str(model))
     return schema, validate, model_name
+
+
+def _tool_status_line(tool_name: str, tool_input: dict[str, Any] | None) -> Optional[str]:
+    """Generate a short status message for tool usage."""
+    if not tool_input:
+        return tool_name
+
+    if tool_name == "Read":
+        if path_str := tool_input.get("path"):
+            return f"{tool_name}: {Path(path_str).name}"
+        else:
+            return f"{tool_name}: {str(tool_input)}"
+    elif tool_name == "Bash":
+        cmd = (
+            tool_input.get("cmd")
+            or tool_input.get("command")
+            or tool_input.get("bash_command")
+        )
+        if not cmd and tool_input:
+            first_val = next(iter(tool_input.values()), "")
+            if isinstance(first_val, str) and len(first_val) < 200:
+                cmd = first_val
+        if cmd:
+            trimmed = cmd.replace("\n", "\\n")
+            suffix = "..." if len(trimmed) > 40 else ""
+            return f"{tool_name}: {trimmed[:40]}{suffix}"
+    elif tool_name in {"Glob", "Grep"}:
+        pattern = (
+            tool_input.get("filePattern")
+            or tool_input.get("pattern")
+            or tool_input.get("patternText")
+        )
+        if pattern:
+            suffix = "..." if len(pattern) > 30 else ""
+            return f"{tool_name}: {pattern[:30]}{suffix}"
+
+    return tool_name
+
+
+def _load_payload_from_path(path_value: str, base_dir: Path) -> Any:
+    """Read JSON payload from a file path, resolving relative to base_dir."""
+    target_path = Path(path_value).expanduser()
+    if not target_path.is_absolute():
+        target_path = (base_dir / target_path).resolve()
+    else:
+        target_path = target_path.resolve()
+
+    if not target_path.exists():
+        raise FileNotFoundError(f"Payload path not found: {target_path}")
+
+    try:
+        with target_path.open("r", encoding="utf-8") as f:
+            return json.load(f)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"Payload file {target_path} does not contain valid JSON") from exc
+
+
+def _handle_assistant_message(
+    message: AssistantMessage,
+    agent_messages: list[dict[str, Any]],
+    status_cb: Optional[Callable[[str], None]],
+) -> None:
+    """Store assistant message blocks and fire status callbacks."""
+    for block in message.content:
+        if isinstance(block, TextBlock):
+            agent_messages.append({"type": "text", "text": block.text})
+            if status_cb:
+                status_cb(block.text[:80].strip())
+        elif isinstance(block, ThinkingBlock):
+            agent_messages.append(
+                {
+                    "type": "thinking",
+                    "thinking": block.thinking,
+                    "signature": block.signature,
+                }
+            )
+            if status_cb:
+                status_cb("thinking...")
+        elif isinstance(block, ToolUseBlock):
+            agent_messages.append(
+                {
+                    "type": "tool_use",
+                    "tool_id": block.id,
+                    "tool_name": block.name,
+                    "input": block.input,
+                }
+            )
+            if status_cb:
+                status_text = _tool_status_line(block.name, block.input)
+                if status_text:
+                    status_cb(status_text)
+        elif isinstance(block, ToolResultBlock):
+            content_str = str(block.content) if block.content is not None else ""
+            agent_messages.append(
+                {
+                    "type": "tool_result",
+                    "tool_use_id": block.tool_use_id,
+                    "content": content_str,
+                    "is_error": block.is_error,
+                }
+            )
+            if status_cb:
+                status_cb("tool result")
 
 
 @retry(
@@ -141,57 +271,75 @@ async def query_with_pydantic_response(
     Returns:
         Validated instance of response_model (after optional postprocess)
     """
-    # Build JSON Schema and validator for BaseModel or dataclass
     schema, validate_payload, response_model_name = _make_adapter(response_model)
-
-    # Extract only the properties and required fields for the tool schema
-    # The tool parameters should match the model's fields directly
+    model_properties = dict(schema.get("properties", {}))
+    required_fields = list(schema.get("required", []))
     tool_schema = {
-        "type": "object",
-        "properties": schema.get("properties", {}),
-        "required": schema.get("required", []),
+        "oneOf": [
+            {
+                "type": "object",
+                "properties": model_properties,
+                "required": required_fields,
+            },
+            {
+                "type": "object",
+                "properties": {
+                    "payload_path": {
+                        "type": "string",
+                        "description": (
+                            "Absolute or relative path to a JSON file that contains the "
+                            "final response payload."
+                        ),
+                    }
+                },
+                "required": ["payload_path"],
+                "additionalProperties": False,
+            },
+        ]
     }
 
+    base_dir = Path(cwd or ".").expanduser().resolve()
     final_obj: Optional[Any] = None
     start_time = time.time()
-    agent_messages = []  # Accumulate all agent messages
+    agent_messages: list[dict[str, Any]] = []
 
-    # Log location on first call
     if not hasattr(log_ai_call, "_printed_location"):
-        logger.info(f"Logging AI calls to: {AI_LOG_FILE}")
-        log_ai_call._printed_location = True
+        logger.info("Logging AI calls to: %s", AI_LOG_FILE)
+        log_ai_call._printed_location = True  # type: ignore[attr-defined]
 
-    # Define the FinalAnswer tool
     @tool(
         "FinalAnswer",
         "Return the final answer as JSON that matches the required schema. "
         "Pass the fields directly as tool parameters, not wrapped in any container.",
         tool_schema,
     )
-    async def final_answer(args: dict[str, Any]) -> dict[str, Any]:
+    async def final_answer(_: dict[str, Any]) -> dict[str, Any]:
         return {"content": [{"type": "text", "text": "received"}]}
 
-    # Capture the FinalAnswer tool payload
-    final_answer_called = False
-    
     async def capture_final(
         input_data: dict[str, Any],
-        tool_use_id: str | None,
-        ctx: HookContext,
+        _tool_use_id: str | None,
+        _ctx: HookContext,
     ) -> dict[str, Any]:
-        nonlocal final_obj, final_answer_called
+        nonlocal final_obj
         if input_data.get("tool_name") == "mcp__answer__FinalAnswer":
-            tool_input = input_data["tool_input"]
-            # Validate using TypeAdapter (works for BaseModel or dataclass)
-            final_obj = validate_payload(tool_input)
-            final_answer_called = True
+            tool_input = input_data.get("tool_input", {})
+            if "payload_path" in tool_input:
+                extra_keys = [key for key in tool_input.keys() if key != "payload_path"]
+                if extra_keys:
+                    raise ValueError(
+                        "FinalAnswer must provide either payload_path or direct fields, not both."
+                    )
+                payload_data = _load_payload_from_path(tool_input["payload_path"], base_dir)
+            else:
+                payload_data = tool_input
+            final_obj = validate_payload(payload_data)
         return {}
 
-    # Block stop until FinalAnswer is called
     async def enforce_final_before_stop(
         input_data: dict[str, Any],
-        tool_use_id: str | None,
-        ctx: HookContext,
+        _tool_use_id: str | None,
+        _ctx: HookContext,
     ) -> dict[str, Any]:
         if final_obj is None:
             return {
@@ -203,155 +351,48 @@ async def query_with_pydantic_response(
             }
         return {}
 
-    # Create MCP server with FinalAnswer tool
     answer_server = create_sdk_mcp_server(name="answer", tools=[final_answer])
-
-    # Configure options
     full_system_prompt = system_prompt + (
         "\n\nWhen you are done with your analysis, call the `FinalAnswer` tool exactly once with "
-        "the final JSON payload that matches the provided schema. "
-        # "Do not print the answer in plain text - use the tool."
+        "the final JSON payload that matches the provided schema. You may either pass the fields "
+        "directly, or provide `payload_path` pointing to a JSON file that contains the full payload."
     )
-
-    # Note: We capture tool usage from ToolUseBlock in AssistantMessage below
-    # No need for PreToolUse hook since it doesn't have parameters yet
-
-    # Build options
-    # Don't use settings parameter - let SDK use defaults but we'll backup .claude.json
     options = ClaudeAgentOptions(
         system_prompt=full_system_prompt,
         mcp_servers={"answer": answer_server},
-        # Don't restrict tools - let Claude use any default tools for analysis
         permission_mode="bypassPermissions",
         cwd=cwd,
         hooks={
-            "PostToolUse": [HookMatcher(matcher="mcp__answer__FinalAnswer", hooks=[capture_final])],
+            "PostToolUse": [
+                HookMatcher(matcher="mcp__answer__FinalAnswer", hooks=[capture_final])
+            ],
             "Stop": [HookMatcher(hooks=[enforce_final_before_stop])],
         },
     )
 
-    # Replace .claude.json with minimal config to avoid hook recursion
-    import shutil
-    import json as json_module
-
-    claude_json = Path.home() / ".claude.json"
-    claude_backup = Path.home() / ".claude.json.dvsmith_backup"
-    backed_up = False
-
-    if claude_json.exists():
-        shutil.move(str(claude_json), str(claude_backup))
-        backed_up = True
-
-    # Create minimal config with no hooks
-    minimal_config = {"version": "1.0", "hooks": []}
-    claude_json.write_text(json_module.dumps(minimal_config))
-
     async with ClaudeSDKClient(options=options) as client:
         await client.query(prompt)
-        # Receive and accumulate all agent messages
         async for message in client.receive_response():
-            # Break early if FinalAnswer already called
-            if final_answer_called:
-                break
-            # Debug logging: show raw message structure
-            logger.debug(f"Received message type: {type(message).__name__}")
+            logger.debug("Received message type: %s", type(message).__name__)
             if hasattr(message, "__dict__"):
-                logger.debug(f"Message attributes: {message.__dict__}")
+                logger.debug("Message attributes: %s", message.__dict__)
 
-            # Handle AssistantMessage which contains content blocks
             if isinstance(message, AssistantMessage):
-                for block in message.content:
-                    if isinstance(block, TextBlock):
-                        agent_messages.append({"type": "text", "text": block.text})
-                        if status_cb:
-                            status_cb(block.text[:80].strip())
-                    elif isinstance(block, ThinkingBlock):
-                        agent_messages.append(
-                            {
-                                "type": "thinking",
-                                "thinking": block.thinking,
-                                "signature": block.signature,
-                            }
-                        )
-                        if status_cb:
-                            status_cb("thinking...")
-                    elif isinstance(block, ToolUseBlock):
-                        agent_messages.append(
-                            {
-                                "type": "tool_use",
-                                "tool_id": block.id,
-                                "tool_name": block.name,
-                                "input": block.input,
-                            }
-                        )
-                        if status_cb and block.input:
-                            # Show tool with details from actual input
-                            import pathlib
-                            tool_name = block.name
-                            detail = ""
-                            
-                            # Extract detail based on tool type
-                            if tool_name == "Read":
-                                if path_str := block.input.get("path", ""):
-                                    detail = f": {pathlib.Path(path_str).name}"
-                                else:
-                                    detail = ": {bloc.input}"
-                            elif tool_name == "Bash":
-                                # Try different key names for Bash command
-                                cmd = block.input.get("cmd") or block.input.get("command") or block.input.get("bash_command", "")
-                                if not cmd and block.input:
-                                    # Fallback: use first value if it looks like a command
-                                    first_val = list(block.input.values())[0] if block.input.values() else ""
-                                    if isinstance(first_val, str) and len(first_val) < 200:
-                                        cmd = first_val
-                                if cmd:
-                                    cmd = cmd.replace("\n", "\\n")
-                                    detail = f": {cmd[:40]}" + ("..." if len(cmd) > 40 else "")
-                            elif tool_name == "Glob":
-                                pattern = block.input.get("filePattern") or block.input.get("pattern", "")
-                                if pattern:
-                                    detail = f": {pattern}"
-                            elif tool_name == "Grep":
-                                pattern = block.input.get("pattern", "")
-                                if pattern:
-                                    detail = f": {pattern[:30]}" + ("..." if len(pattern) > 30 else "")
-                            
-                            status_cb(f"{tool_name}{detail}")
-                    elif isinstance(block, ToolResultBlock):
-                        content_str = str(block.content) if block.content is not None else ""
-                        agent_messages.append(
-                            {
-                                "type": "tool_result",
-                                "tool_use_id": block.tool_use_id,
-                                "content": content_str,
-                                "is_error": block.is_error,
-                            }
-                        )
-                        if status_cb:
-                            status_cb("tool result")
-            # Log other message types for debugging
+                _handle_assistant_message(message, agent_messages, status_cb)
             else:
-                agent_messages.append({"type": type(message).__name__, "raw": str(message)})
+                agent_messages.append(
+                    {"type": type(message).__name__, "raw": str(message)}
+                )
 
-    # Log successful call
+            if final_obj is not None:
+                break
+
     duration_ms = (time.time() - start_time) * 1000
-    response_data = final_obj.model_dump() if hasattr(final_obj, "model_dump") else final_obj
-    response_model_name = getattr(response_model, "__name__", str(response_model))
-    log_ai_call(
-        prompt=prompt,
-        response_model_name=response_model_name,
-        schema=schema,
-        response=response_data,
-        duration_ms=duration_ms,
-        messages=agent_messages,
-    )
-
     if final_obj is None:
-        duration_ms = (time.time() - start_time) * 1000
         error_msg = "Claude finished without calling FinalAnswer"
         log_ai_call(
             prompt=prompt,
-            response_model_name=response_model.__name__,
+            response_model_name=response_model_name,
             schema=schema,
             error=error_msg,
             duration_ms=duration_ms,
@@ -362,4 +403,17 @@ async def query_with_pydantic_response(
             "Check that the prompt is clear about calling FinalAnswer."
         )
 
-    return final_obj
+    result_obj = postprocess(final_obj) if postprocess else final_obj
+    response_payload = (
+        result_obj.model_dump() if hasattr(result_obj, "model_dump") else result_obj
+    )
+    log_ai_call(
+        prompt=prompt,
+        response_model_name=response_model_name,
+        schema=schema,
+        response=response_payload,
+        duration_ms=duration_ms,
+        messages=agent_messages,
+    )
+
+    return result_obj
