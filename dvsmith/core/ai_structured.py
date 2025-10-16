@@ -278,38 +278,26 @@ async def query_with_pydantic_response(
                                 "input": block.input,
                             }
                         )
-                        if status_cb:
+                        if status_cb and block.input:
                             # Show tool with details from actual input
-                            from pathlib import Path as PathLib
+                            import pathlib
                             tool_name = block.name
                             detail = ""
                             
-                            # Debug: Check what's in block.input
-                            if block.input and isinstance(block.input, dict) and block.input:
-                                # Show first key/value as detail
-                                first_key = list(block.input.keys())[0] if block.input.keys() else None
-                                if first_key and tool_name in ["Read", "Bash", "Glob"]:
-                                    val = str(block.input[first_key])
-                                    if tool_name == "Read":
-                                        detail = f": {PathLib(val).name if '/' in val else val[:30]}"
-                                    elif tool_name == "Bash":
-                                        detail = f": {val[:40]}" + ("..." if len(val) > 40 else "")
-                                    elif tool_name == "Glob":
-                                        detail = f": {val}"
-                            
-                            if not detail and tool_name == "Read" and block.input:
+                            # Extract detail based on tool type
+                            if tool_name == "Read":
                                 path_str = block.input.get("path", "")
                                 if path_str:
-                                    detail = f": {PathLib(path_str).name}"
-                            elif tool_name == "Bash" and block.input:
+                                    detail = f": {pathlib.Path(path_str).name}"
+                            elif tool_name == "Bash":
                                 cmd = block.input.get("cmd", "")
                                 if cmd:
                                     detail = f": {cmd[:40]}" + ("..." if len(cmd) > 40 else "")
-                            elif tool_name == "Glob" and block.input:
+                            elif tool_name == "Glob":
                                 pattern = block.input.get("filePattern") or block.input.get("pattern", "")
                                 if pattern:
                                     detail = f": {pattern}"
-                            elif tool_name == "Grep" and block.input:
+                            elif tool_name == "Grep":
                                 pattern = block.input.get("pattern", "")
                                 if pattern:
                                     detail = f": {pattern[:30]}" + ("..." if len(pattern) > 30 else "")
