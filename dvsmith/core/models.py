@@ -187,6 +187,17 @@ class UVMSequence:
 
 
 @dataclass
+class UVMSequence:
+    """Discovered UVM sequence information."""
+
+    name: str
+    file_path: Path
+    base_class: str
+    description: Optional[str] = None
+    line_number: Optional[int] = None
+
+
+@dataclass
 class RepoAnalysis:
     """Results of repository analysis."""
 

@@ -51,8 +51,7 @@ Return RepoAnalysis with:
 - repo_root: {str(self.repo_root)}
 - tests: List[UVMTest] with {name, file_path, base_class, description}
 - sequences: List[UVMSequence] with {name, file_path, base_class}
-- coverage_components: List[UVMCoverageComponent] with {name, file_path, base_class, covergroups: List[str]}
-- covergroups: List[str] in format "ClassName.covergroupName" (if class context unknown, just "covergroupName@relative/path")
+- coverage_components: List[UVMCoverageComponent] with {name, file_path, base_class}
 - build_system: BuildSystem enum (MAKEFILE, CMAKE, FUSESOC, DVSIM, CUSTOM)
 - detected_simulators: List[Simulator] (QUESTA, XCELIUM, VCS, VERILATOR, DSIM)
 - tests_dir, sequences_dir, env_dir, agents_dir: Optional paths (relative)
