@@ -129,12 +129,8 @@ class Profile(BaseModel):
         """
         path.parent.mkdir(parents=True, exist_ok=True)
         
-        # Convert to dict - include analysis cache for build command
+        # Use Pydantic's built-in model_dump()
         data = self.model_dump(exclude_none=True, by_alias=False)
         
         with open(path, "w") as f:
             yaml.dump(data, f, sort_keys=False, default_flow_style=False)
-    
-    def to_dict(self) -> dict:
-        """Convert to dictionary (for backwards compatibility)."""
-        return self.model_dump(exclude={"_analysis_cache"}, exclude_none=True)
