@@ -2,10 +2,10 @@
 
 import contextlib
 import json
-from dataclasses import dataclass, field
+from pydantic import BaseModel, Field, ConfigDict
 from enum import Enum
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List
 
 
 class Simulator(str, Enum):
@@ -112,7 +112,7 @@ class HealthMetrics:
 class CoverageReport:
     """Normalized coverage report across all simulators."""
 
-    functional_groups: list[CoverageGroup] = field(default_factory=list)
+    functional_groups: list[CoverageGroup] = Field(default_factory=list)
     code_coverage: CodeCoverage = field(default_factory=CodeCoverage)
     health: HealthMetrics = field(default_factory=HealthMetrics)
     raw_report_path: Optional[Path] = None
@@ -163,19 +163,17 @@ class CoverageReport:
         return json.dumps(data, indent=2)
 
 
-@dataclass
-class UVMTest:
+class UVMTest(BaseModel):
     """Discovered UVM test information."""
 
     name: str
     file_path: Path
     base_class: str
-    sequences_used: list[str] = field(default_factory=list)
+    sequences_used: List[str] = Field(default_factory=list)
     description: Optional[str] = None
 
 
-@dataclass
-class UVMSequence:
+class UVMSequence(BaseModel):
     """Discovered UVM sequence information."""
 
     name: str
@@ -192,17 +190,16 @@ class UVMCoverageComponent:
     file_path: Path
     base_class: str
     description: Optional[str] = None
-    covergroups: list[str] = field(default_factory=list)
+    covergroups: List[str] = Field(default_factory=list)
 
 
-@dataclass
-class RepoAnalysis:
-    tests: list[UVMTest] = field(default_factory=list)
-    sequences: list[UVMSequence] = field(default_factory=list)
-    coverage_components: list[UVMCoverageComponent] = field(default_factory=list)
-    covergroups: list[str] = field(default_factory=list)
+class RepoAnalysis(BaseModel):
+    tests: List[UVMTest] = Field(default_factory=list)
+    sequences: List[UVMSequence] = Field(default_factory=list)
+    coverage_components: list[UVMCoverageComponent] = Field(default_factory=list)
+    covergroups: List[str] = Field(default_factory=list)
     build_system: Optional[BuildSystem] = None
-    detected_simulators: list[Simulator] = field(default_factory=list)
+    detected_simulators: List[Simulator] = Field(default_factory=list)
     repo_root: Optional[Path] = None
 
     # Path hints
@@ -311,16 +308,16 @@ class RepoAnalysis:
             agents_dir=Path(data["agents_dir"]) if data.get("agents_dir") else None,
         )
 
-    def _derived_covergroups(self) -> list[str]:
+    def _derived_covergroups(self) -> List[str]:
         """Flatten covergroups from coverage components."""
-        derived: list[str] = []
+        derived: List[str] = []
         for component in self.coverage_components:
             for cg in component.covergroups:
                 if cg and cg not in derived:
                     derived.append(cg)
         return derived
 
-    def get_covergroups(self) -> list[str]:
+    def get_covergroups(self) -> List[str]:
         """Return explicit or derived covergroup names."""
         return self.covergroups or self._derived_covergroups()
 
@@ -329,7 +326,7 @@ class RepoAnalysis:
 class AcceptanceCriteria:
     """Task acceptance criteria."""
 
-    functional_bins: list[str] = field(default_factory=list)
+    functional_bins: List[str] = Field(default_factory=list)
     functional_min_pct: float = 80.0
     functional_strategy: str = "any_of"  # or "all_of"
 
@@ -359,9 +356,9 @@ class TaskSpec:
     goal: str
     acceptance: AcceptanceCriteria
     category: TaskCategory = TaskCategory.STIMULUS
-    hints: list[str] = field(default_factory=list)
-    original_test_files: list[Path] = field(default_factory=list)
-    supported_simulators: list[Simulator] = field(default_factory=list)
+    hints: List[str] = Field(default_factory=list)
+    original_test_files: list[Path] = Field(default_factory=list)
+    supported_simulators: List[Simulator] = Field(default_factory=list)
     notes: Optional[str] = None
 
     def to_markdown(self) -> str:
@@ -698,8 +695,8 @@ class EvaluationResult:
     health_score: float
 
     # Details
-    functional_bins_met: list[str] = field(default_factory=list)
-    functional_bins_missed: list[str] = field(default_factory=list)
+    functional_bins_met: List[str] = Field(default_factory=list)
+    functional_bins_missed: List[str] = Field(default_factory=list)
     thresholds_met: dict[str, bool] = field(default_factory=dict)
 
     # Artifacts
