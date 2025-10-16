@@ -16,7 +16,7 @@ async def with_live_agent_feed(
     async_func: Callable[..., Awaitable[T]],
     console: Console,
     title: str = "Agent Activity",
-    max_messages: int = 5,
+    max_messages: int = 15,
     *args,
     **kwargs
 ) -> T:
