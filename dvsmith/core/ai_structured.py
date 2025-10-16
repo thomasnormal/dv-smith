@@ -6,7 +6,9 @@ import os
 import shutil
 import time
 from contextlib import contextmanager
+from dataclasses import asdict, is_dataclass
 from datetime import datetime, timezone
+from enum import Enum
 from pathlib import Path
 from typing import Any, Callable, Iterator, Optional, Tuple
 
@@ -65,6 +67,35 @@ def temporarily_override_claude_config(config: dict[str, Any]) -> Iterator[None]
             logger.warning("Failed to restore Claude config: %s", exc)
 
 
+def _json_safe(value: Any) -> Any:
+    """Convert objects to JSON-serializable structures."""
+    if value is None:
+        return None
+
+    if hasattr(value, "model_dump"):
+        return _json_safe(value.model_dump())
+
+    if is_dataclass(value):
+        return _json_safe(asdict(value))
+
+    if isinstance(value, Enum):
+        return value.value
+
+    if isinstance(value, Path):
+        return str(value)
+
+    if isinstance(value, dict):
+        return {key: _json_safe(val) for key, val in value.items()}
+
+    if isinstance(value, (list, tuple, set)):
+        return [_json_safe(item) for item in value]
+
+    if isinstance(value, (str, int, float, bool)):
+        return value
+
+    return str(value)
+
+
 def log_ai_call(
     prompt: str,
     response_model_name: str,
@@ -92,11 +123,11 @@ def log_ai_call(
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "prompt": prompt,
             "response_model": response_model_name,
-            "schema": schema,
-            "response": response,
+            "schema": _json_safe(schema),
+            "response": _json_safe(response),
             "error": error,
             "duration_ms": duration_ms,
-            "messages": messages or [],
+            "messages": _json_safe(messages or []),
         }
 
         # Use file lock to prevent concurrent writes
@@ -143,7 +174,9 @@ def _tool_status_line(tool_name: str, tool_input: dict[str, Any] | None) -> Opti
         return tool_name
 
     if tool_name == "Read":
-        return f"{tool_name}: {tool_input.get('file_path', 'unknown file')}"
+        path_str = tool_input.get('path') or tool_input.get('file_path')
+        if path_str:
+            return f"{tool_name}: {Path(path_str).name}"
     elif tool_name == "Bash":
         cmd = (
             tool_input.get("cmd")
@@ -201,7 +234,7 @@ def _handle_assistant_message(
         if isinstance(block, TextBlock):
             agent_messages.append({"type": "text", "text": block.text})
             if status_cb:
-                status_cb(f"> {block.text[:80].strip()}")
+                status_cb(block.text[:80].strip())
         elif isinstance(block, ThinkingBlock):
             agent_messages.append(
                 {
@@ -401,14 +434,11 @@ async def query_with_pydantic_response(
         )
 
     result_obj = postprocess(final_obj) if postprocess else final_obj
-    response_payload = (
-        result_obj.model_dump() if hasattr(result_obj, "model_dump") else result_obj
-    )
     log_ai_call(
         prompt=prompt,
         response_model_name=response_model_name,
         schema=schema,
-        response=response_payload,
+        response=result_obj,
         duration_ms=duration_ms,
         messages=agent_messages,
     )
