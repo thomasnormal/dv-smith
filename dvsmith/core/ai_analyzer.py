@@ -36,27 +36,28 @@ Repository path: {self.repo_root}
 
 Your task:
 1. Explore the repository using your tools (Read, Glob, Bash, Grep)
-2. Find ALL UVM tests (classes extending uvm_test or *Test)
-3. Find ALL UVM sequences (classes extending uvm_sequence or *Sequence)
-4. Find covergroups (search for 'covergroup' keyword)
-5. Detect build system (look for Makefile, CMakeLists.txt, etc.)
-6. Identify simulators (questa, xcelium, vcs, etc. in build files)
+2. Find ALL UVM tests (classes extending uvm_test or names ending with *Test)
+3. Find ALL UVM sequences (classes extending uvm_sequence or names ending with *Sequence)
+4. Find ALL UVM coverage components (classes extending uvm_subscriber<#(...)> OR uvm_component that define one or more covergroups). Also list any covergroups found (search for 'covergroup').
+5. Detect build system (look for Makefile, CMakeLists.txt, FuseSoC *.core, Dvsim *.hjson, etc.)
+6. Identify simulators (questa/mentor, xcelium/xrun, vcs, verilator, dsim) referenced in build files or scripts
 
-For tests and sequences:
-- Check under test/ or similar directories
-- Also check nested directories (test/sequences/, etc.)
-- Return relative paths from repo root
+Notes:
+- Search typical locations (test/, tests/, sequences/, seq/, env/, agents/, verification/, tb/) and nested dirs
+- Consider both .sv and .svh files
+- Return file paths relative to the repo root
 
 Return RepoAnalysis with:
 - repo_root: {str(self.repo_root)}
-- tests: List[UVMTest] with name, file_path (relative), base_class, description
-- sequences: List[UVMSequence] with name, file_path (relative), base_class
-- covergroups: List[str] in format "ClassName.covergroupName"
+- tests: List[UVMTest] with {name, file_path, base_class, description}
+- sequences: List[UVMSequence] with {name, file_path, base_class}
+- coverage_components: List[UVMCoverageComponent] with {name, file_path, base_class, covergroups: List[str]}
+- covergroups: List[str] in format "ClassName.covergroupName" (if class context unknown, just "covergroupName@relative/path")
 - build_system: BuildSystem enum (MAKEFILE, CMAKE, FUSESOC, DVSIM, CUSTOM)
 - detected_simulators: List[Simulator] (QUESTA, XCELIUM, VCS, VERILATOR, DSIM)
 - tests_dir, sequences_dir, env_dir, agents_dir: Optional paths (relative)
 
-Be thorough - use tools to explore!
+Be thorough—use the tools to explore!
 """
 
         # Single AI call returns RepoAnalysis directly

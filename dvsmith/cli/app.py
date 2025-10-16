@@ -25,6 +25,8 @@ load_dotenv()
 from .commands.ingest import ingest_command
 from .commands.build import build_command
 from .commands.profile_commands import list_profiles_command, validate_profile_command, info_command
+from .commands.run import run_command
+from .commands.eval import eval_command
 
 __version__ = "0.2.0"
 
@@ -54,11 +56,13 @@ def main_callback(
 # Register commands
 app.command(name="ingest")(ingest_command)
 app.command(name="build")(build_command)
+app.command(name="run")(run_command)
+app.command(name="eval")(eval_command)
 app.command(name="list-profiles")(list_profiles_command)
 app.command(name="validate-profile")(validate_profile_command)
 app.command(name="info")(info_command)
 
-# TODO: Add run, eval, cvdp commands from separate files
+# TODO: Add cvdp commands from separate file
 
 def main():
     """Entry point for CLI."""
