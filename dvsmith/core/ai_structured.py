@@ -217,32 +217,45 @@ async def query_with_pydantic_response(
         ctx: HookContext,
     ) -> dict[str, Any]:
         """Capture all tool executions for status updates."""
+        if not status_cb:
+            return {}
+            
         tool_name = input_data.get("tool_name", "")
-        if status_cb and tool_name:
-            # Extract just the tool name (remove mcp__ prefix if present)
-            display_name = tool_name.split("__")[-1] if "__" in tool_name else tool_name
+        if not tool_name:
+            return {}
             
-            # Try to get tool parameters for better context
-            tool_input = input_data.get("tool_input", {})
-            detail = ""
-            
-            if display_name == "Read" and "path" in tool_input:
-                path_str = tool_input["path"]
-                # Show just filename
-                from pathlib import Path
-                detail = f" {Path(path_str).name}"
-            elif display_name == "Bash" and "cmd" in tool_input:
-                cmd = tool_input["cmd"]
-                # Show first 50 chars
-                detail = f" {cmd[:50]}" + ("..." if len(cmd) > 50 else "")
-            elif display_name == "Glob" and "filePattern" in tool_input:
-                pattern = tool_input["filePattern"]
-                detail = f" {pattern}"
-            elif display_name == "Grep" and "pattern" in tool_input:
-                pattern = tool_input["pattern"]
-                detail = f" {pattern[:40]}" + ("..." if len(pattern) > 40 else "")
-            
-            status_cb(f"tool: {display_name}{detail}")
+        # Extract just the tool name (remove mcp__ prefix if present)
+        display_name = tool_name.split("__")[-1] if "__" in tool_name else tool_name
+        
+        # Get tool input - might be in different keys depending on hook timing
+        tool_input = input_data.get("tool_input") or input_data.get("input") or {}
+        
+        # Debug: log what we have
+        # logger.debug(f"Tool: {display_name}, input_data keys: {input_data.keys()}, tool_input: {tool_input}")
+        
+        detail = ""
+        
+        if tool_input and isinstance(tool_input, dict):
+            if display_name == "Read":
+                path_str = tool_input.get("path", "")
+                if path_str:
+                    from pathlib import Path
+                    detail = f": {Path(path_str).name}"
+            elif display_name == "Bash":
+                cmd = tool_input.get("cmd", "")
+                if cmd:
+                    # Show first 40 chars
+                    detail = f": {cmd[:40]}" + ("..." if len(cmd) > 40 else "")
+            elif display_name == "Glob":
+                pattern = tool_input.get("filePattern") or tool_input.get("pattern", "")
+                if pattern:
+                    detail = f": {pattern}"
+            elif display_name == "Grep":
+                pattern = tool_input.get("pattern", "")
+                if pattern:
+                    detail = f": {pattern[:30]}" + ("..." if len(pattern) > 30 else "")
+        
+        status_cb(f"tool: {display_name}{detail}")
         return {}
 
     # Build options
