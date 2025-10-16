@@ -80,21 +80,33 @@ profile = yaml.safe_load(open("profile.yaml"))
 
 ### Imports
 
+**IMPORTANT: All imports must be at the top of the file.**
+
 ```python
-# Standard library
+# Standard library (alphabetical)
 import asyncio
 import json
+import shutil
 from pathlib import Path
+from typing import Optional
 
-# Third-party
+# Third-party (alphabetical)
 import typer
-from rich.console import Console
 from pydantic import BaseModel
+from rich.console import Console
 
-# Local
+# Local (alphabetical by module, then by import)
 from ..config import Profile
-from .models import RepoAnalysis
+from ..core.models import RepoAnalysis
+from .live_feed import with_live_agent_feed
 ```
+
+**Rules:**
+- ✅ All imports at the top (no imports inside functions)
+- ✅ Group by: stdlib, third-party, local
+- ✅ Alphabetical within each group
+- ✅ Absolute imports for local code (from ...package import)
+- ❌ Never import inside functions (except for type checking)
 
 ### Logging
 

@@ -41,8 +41,6 @@ def ingest_command(
         
         # Clone if URL
         if repo_url.startswith(("http://", "https://", "git@")):
-            import shutil
-            
             clones_dir = workspace / "clones"
             clones_dir.mkdir(parents=True, exist_ok=True)
             
