@@ -292,9 +292,10 @@ async def query_with_pydantic_response(
                             
                             # Extract detail based on tool type
                             if tool_name == "Read":
-                                path_str = block.input.get("path", "")
-                                if path_str:
+                                if path_str := block.input.get("path", ""):
                                     detail = f": {pathlib.Path(path_str).name}"
+                                else:
+                                    detail = ": {bloc.input}"
                             elif tool_name == "Bash":
                                 # Try different key names for Bash command
                                 cmd = block.input.get("cmd") or block.input.get("command") or block.input.get("bash_command", "")
@@ -304,6 +305,7 @@ async def query_with_pydantic_response(
                                     if isinstance(first_val, str) and len(first_val) < 200:
                                         cmd = first_val
                                 if cmd:
+                                    cmd = cmd.replace("\n", "\\n")
                                     detail = f": {cmd[:40]}" + ("..." if len(cmd) > 40 else "")
                             elif tool_name == "Glob":
                                 pattern = block.input.get("filePattern") or block.input.get("pattern", "")
