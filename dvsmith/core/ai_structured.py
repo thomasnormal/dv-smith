@@ -172,16 +172,19 @@ async def query_with_pydantic_response(
         return {"content": [{"type": "text", "text": "received"}]}
 
     # Capture the FinalAnswer tool payload
+    final_answer_called = False
+    
     async def capture_final(
         input_data: dict[str, Any],
         tool_use_id: str | None,
         ctx: HookContext,
     ) -> dict[str, Any]:
-        nonlocal final_obj
+        nonlocal final_obj, final_answer_called
         if input_data.get("tool_name") == "mcp__answer__FinalAnswer":
             tool_input = input_data["tool_input"]
             # Validate using TypeAdapter (works for BaseModel or dataclass)
             final_obj = validate_payload(tool_input)
+            final_answer_called = True
         return {}
 
     # Block stop until FinalAnswer is called
@@ -247,6 +250,9 @@ async def query_with_pydantic_response(
         await client.query(prompt)
         # Receive and accumulate all agent messages
         async for message in client.receive_response():
+            # Break early if FinalAnswer already called
+            if final_answer_called:
+                break
             # Debug logging: show raw message structure
             logger.debug(f"Received message type: {type(message).__name__}")
             if hasattr(message, "__dict__"):
