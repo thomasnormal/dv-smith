@@ -1,17 +1,19 @@
 """Build command - create gym from profile."""
 
 import asyncio
+import shutil
 from pathlib import Path
 from typing import Optional
 
 import typer
+from pydantic import BaseModel, Field
 from rich.console import Console
 from rich.table import Table
-from pydantic import BaseModel, Field
 
-from ...core.task_generator import TaskGenerator
-from ...core.models import RepoAnalysis
 from ...config import Profile
+from ...core.ai_analyzer import AIRepoAnalyzer
+from ...core.ai_structured import query_with_pydantic_response
+from ...core.task_generator import TaskGenerator
 from ..live_feed import with_live_agent_feed
 
 
@@ -27,8 +29,6 @@ def build_command(
     """Build a gym from an analyzed profile."""
     
     async def run_build():
-        from ...core.ai_structured import query_with_pydantic_response
-        
         console.print(f"[cyan]Building gym:[/] {name}")
         
         # Load profile
@@ -39,16 +39,17 @@ def build_command(
         
         profile = Profile.from_yaml(profile_path)
         
-        # Load cached analysis
-        if not profile.analysis_cache:
-            console.print("[red]✗ No cached analysis found. Run 'ingest' first.[/]")
+        repo_path = Path(profile.repo_url)
+        if not repo_path.exists():
+            console.print(f"[red]✗ Repository not found:[/] {repo_path}")
             raise typer.Exit(1)
         
-        repo_path = Path(profile.repo_url)
         console.print(f"[cyan]Repository:[/] {repo_path}")
         
-        # Reconstruct analysis from cache
-        analysis = RepoAnalysis.from_dict(profile.analysis_cache, repo_root=repo_path)
+        # Re-analyze repository (fast, ensures fresh data)
+        with console.status("[cyan]Analyzing repository..."):
+            analyzer = AIRepoAnalyzer(repo_root=repo_path)
+            analysis = await analyzer.analyze(show_progress=False)
         
         # Setup gym structure
         gym_dir = workspace / "gyms" / name
