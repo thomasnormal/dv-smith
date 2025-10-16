@@ -200,6 +200,7 @@ class RepoAnalysis:
     tests: list[UVMTest] = field(default_factory=list)
     sequences: list[UVMSequence] = field(default_factory=list)
     coverage_components: list[UVMCoverageComponent] = field(default_factory=list)
+    covergroups: list[str] = field(default_factory=list)
     build_system: Optional[BuildSystem] = None
     detected_simulators: list[Simulator] = field(default_factory=list)
     repo_root: Optional[Path] = None
@@ -238,7 +239,17 @@ class RepoAnalysis:
                 }
                 for s in self.sequences
             ],
-            "covergroups": self.covergroups,
+            "coverage_components": [
+                {
+                    "name": comp.name,
+                    "file_path": str(comp.file_path),
+                    "base_class": comp.base_class,
+                    "description": comp.description,
+                    "covergroups": comp.covergroups,
+                }
+                for comp in self.coverage_components
+            ],
+            "covergroups": self.get_covergroups(),
             "build_system": self.build_system.value if self.build_system else None,
             "detected_simulators": [s.value for s in self.detected_simulators],
             "repo_root": str(self.repo_root) if self.repo_root else None,
@@ -280,6 +291,16 @@ class RepoAnalysis:
                 )
                 for s in data.get("sequences", [])
             ],
+            coverage_components=[
+                UVMCoverageComponent(
+                    name=item["name"],
+                    file_path=Path(item["file_path"]),
+                    base_class=item["base_class"],
+                    description=item.get("description"),
+                    covergroups=item.get("covergroups", []),
+                )
+                for item in data.get("coverage_components", [])
+            ],
             covergroups=data.get("covergroups", []),
             build_system=BuildSystem(data["build_system"]) if data.get("build_system") else None,
             detected_simulators=[Simulator(s) for s in data.get("detected_simulators", [])],
@@ -289,6 +310,19 @@ class RepoAnalysis:
             env_dir=Path(data["env_dir"]) if data.get("env_dir") else None,
             agents_dir=Path(data["agents_dir"]) if data.get("agents_dir") else None,
         )
+
+    def _derived_covergroups(self) -> list[str]:
+        """Flatten covergroups from coverage components."""
+        derived: list[str] = []
+        for component in self.coverage_components:
+            for cg in component.covergroups:
+                if cg and cg not in derived:
+                    derived.append(cg)
+        return derived
+
+    def get_covergroups(self) -> list[str]:
+        """Return explicit or derived covergroup names."""
+        return self.covergroups or self._derived_covergroups()
 
 
 @dataclass

@@ -81,9 +81,12 @@ def ingest_command(
         
         table.add_row("Tests", str(len(analysis.tests)))
         table.add_row("Sequences", str(len(analysis.sequences)))
-        table.add_row("Covergroups", str(len(analysis.covergroups)))
-        table.add_row("Build System", str(analysis.build_system.value))
-        table.add_row("Simulators", ", ".join(s.value for s in analysis.detected_simulators))
+        covergroup_names = analysis.get_covergroups()
+        table.add_row("Covergroups", str(len(covergroup_names)))
+        build_system_value = analysis.build_system.value if analysis.build_system else "unknown"
+        table.add_row("Build System", build_system_value)
+        simulators_display = ", ".join(s.value for s in analysis.detected_simulators) or "none"
+        table.add_row("Simulators", simulators_display)
         
         console.print(table)
         
@@ -118,9 +121,9 @@ def ingest_command(
             metadata={
                 "test_count": len(analysis.tests),
                 "sequence_count": len(analysis.sequences),
-                "covergroup_count": len(analysis.covergroups),
-                "build_system": analysis.build_system.value,
-                "covergroups": analysis.covergroups,
+                "covergroup_count": len(covergroup_names),
+                "build_system": build_system_value,
+                "covergroups": covergroup_names,
             },
         )
         

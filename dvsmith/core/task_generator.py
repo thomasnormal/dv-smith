@@ -202,8 +202,8 @@ class TaskGenerator:
             with contextlib.suppress(Exception):
                 test_code = test.file_path.read_text()[:3000]
 
-        # Get available covergroups (already strings in analysis.coverage_components)
-        available_cgs = self.analysis.coverage_components if self.analysis.coverage_components else []
+        # Get available covergroups from analysis or profile defaults
+        available_cgs = self.analysis.get_covergroups()
         if not available_cgs:
             available_cgs = (
                 self.config.get("coverage", {}).get("questa", {}).get("functional_covergroups", [])
@@ -295,8 +295,8 @@ Analyze the test thoroughly and provide comprehensive, high-quality metadata.
         thresholds = grading_config.get("thresholds", {})
         weights = grading_config.get("weights", {})
 
-        # Validate covergroups exist (already strings in analysis.coverage_components)
-        available_cgs = self.analysis.coverage_components if self.analysis.coverage_components else []
+        # Validate covergroups exist
+        available_cgs = self.analysis.get_covergroups()
         if not available_cgs:
             available_cgs = (
                 self.config.get("coverage", {}).get("questa", {}).get("functional_covergroups", [])

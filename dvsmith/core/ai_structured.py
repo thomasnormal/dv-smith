@@ -143,10 +143,7 @@ def _tool_status_line(tool_name: str, tool_input: dict[str, Any] | None) -> Opti
         return tool_name
 
     if tool_name == "Read":
-        if path_str := tool_input.get("path"):
-            return f"{tool_name}: {Path(path_str).name}"
-        else:
-            return f"{tool_name}: {str(tool_input)}"
+        return f"{tool_name}: {tool_input.get('file_path', 'unknown file')}"
     elif tool_name == "Bash":
         cmd = (
             tool_input.get("cmd")
@@ -170,6 +167,8 @@ def _tool_status_line(tool_name: str, tool_input: dict[str, Any] | None) -> Opti
         if pattern:
             suffix = "..." if len(pattern) > 30 else ""
             return f"{tool_name}: {pattern[:30]}{suffix}"
+    else:
+        return f"{tool_name}: {str(tool_input)[:80]}"
 
     return tool_name
 
@@ -202,7 +201,7 @@ def _handle_assistant_message(
         if isinstance(block, TextBlock):
             agent_messages.append({"type": "text", "text": block.text})
             if status_cb:
-                status_cb(block.text[:80].strip())
+                status_cb(f"> {block.text[:80].strip()}")
         elif isinstance(block, ThinkingBlock):
             agent_messages.append(
                 {
@@ -223,9 +222,7 @@ def _handle_assistant_message(
                 }
             )
             if status_cb:
-                status_text = _tool_status_line(block.name, block.input)
-                if status_text:
-                    status_cb(status_text)
+                status_cb(_tool_status_line(block.name, block.input))
         elif isinstance(block, ToolResultBlock):
             content_str = str(block.content) if block.content is not None else ""
             agent_messages.append(

@@ -102,5 +102,12 @@ Be thorough—use the tools to explore!
         for seq in analysis.sequences:
             if not seq.file_path.is_absolute():
                 seq.file_path = self.repo_root / seq.file_path
+
+        for component in analysis.coverage_components:
+            if not component.file_path.is_absolute():
+                component.file_path = self.repo_root / component.file_path
+
+        if not analysis.covergroups:
+            analysis.covergroups = analysis._derived_covergroups()
         
         return analysis

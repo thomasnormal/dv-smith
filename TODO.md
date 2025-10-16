@@ -51,10 +51,15 @@
   - Parallel ingestion
   - Aggregate statistics
 
+## In Progress
+
+- [ ] Docker-based agent execution (runner.py created, --docker flag added)
+- [ ] Complete evaluate command (placeholder working, full eval TODO)
+
 ## Done ✅
 
 - [x] Async architecture
-- [x] Typer + Rich CLI
+- [x] Typer + Rich CLI (8 commands)
 - [x] Pydantic Settings
 - [x] CVDP export
 - [x] Live agent feed
@@ -65,3 +70,11 @@
 - [x] Sequence detection (nested fallback)
 - [x] Agent runner (dvsmith run)
 - [x] Clean architecture (reusable utilities)
+- [x] Old CLI removed (966 lines deleted)
+- [x] Single AI call for analysis (917 → 106 lines)
+- [x] Modular command structure
+- [x] Remove analysis_cache complexity
+- [x] All imports at file top
+- [x] Use Pydantic model_dump() (removed custom to_dict)
+- [x] coverage_components field rename
+- [x] Early exit after FinalAnswer
