@@ -210,53 +210,8 @@ async def query_with_pydantic_response(
         # "Do not print the answer in plain text - use the tool."
     )
 
-    # Hook to capture ALL tool usage (not just FinalAnswer)
-    async def capture_all_tools(
-        input_data: dict[str, Any],
-        tool_use_id: str | None,
-        ctx: HookContext,
-    ) -> dict[str, Any]:
-        """Capture all tool executions for status updates."""
-        if not status_cb:
-            return {}
-            
-        tool_name = input_data.get("tool_name", "")
-        if not tool_name:
-            return {}
-            
-        # Extract just the tool name (remove mcp__ prefix if present)
-        display_name = tool_name.split("__")[-1] if "__" in tool_name else tool_name
-        
-        # Get tool input - might be in different keys depending on hook timing
-        tool_input = input_data.get("tool_input") or input_data.get("input") or {}
-        
-        # Debug: log what we have
-        # logger.debug(f"Tool: {display_name}, input_data keys: {input_data.keys()}, tool_input: {tool_input}")
-        
-        detail = ""
-        
-        if tool_input and isinstance(tool_input, dict):
-            if display_name == "Read":
-                path_str = tool_input.get("path", "")
-                if path_str:
-                    from pathlib import Path
-                    detail = f": {Path(path_str).name}"
-            elif display_name == "Bash":
-                cmd = tool_input.get("cmd", "")
-                if cmd:
-                    # Show first 40 chars
-                    detail = f": {cmd[:40]}" + ("..." if len(cmd) > 40 else "")
-            elif display_name == "Glob":
-                pattern = tool_input.get("filePattern") or tool_input.get("pattern", "")
-                if pattern:
-                    detail = f": {pattern}"
-            elif display_name == "Grep":
-                pattern = tool_input.get("pattern", "")
-                if pattern:
-                    detail = f": {pattern[:30]}" + ("..." if len(pattern) > 30 else "")
-        
-        status_cb(f"tool: {display_name}{detail}")
-        return {}
+    # Note: We capture tool usage from ToolUseBlock in AssistantMessage below
+    # No need for PreToolUse hook since it doesn't have parameters yet
 
     # Build options
     # Don't use settings parameter - let SDK use defaults but we'll backup .claude.json
@@ -267,7 +222,6 @@ async def query_with_pydantic_response(
         permission_mode="bypassPermissions",
         cwd=cwd,
         hooks={
-            "PreToolUse": [HookMatcher(hooks=[capture_all_tools])],  # Capture ALL tools
             "PostToolUse": [HookMatcher(matcher="mcp__answer__FinalAnswer", hooks=[capture_final])],
             "Stop": [HookMatcher(hooks=[enforce_final_before_stop])],
         },
@@ -330,7 +284,20 @@ async def query_with_pydantic_response(
                             tool_name = block.name
                             detail = ""
                             
-                            if tool_name == "Read" and block.input:
+                            # Debug: Check what's in block.input
+                            if block.input and isinstance(block.input, dict) and block.input:
+                                # Show first key/value as detail
+                                first_key = list(block.input.keys())[0] if block.input.keys() else None
+                                if first_key and tool_name in ["Read", "Bash", "Glob"]:
+                                    val = str(block.input[first_key])
+                                    if tool_name == "Read":
+                                        detail = f": {PathLib(val).name if '/' in val else val[:30]}"
+                                    elif tool_name == "Bash":
+                                        detail = f": {val[:40]}" + ("..." if len(val) > 40 else "")
+                                    elif tool_name == "Glob":
+                                        detail = f": {val}"
+                            
+                            if not detail and tool_name == "Read" and block.input:
                                 path_str = block.input.get("path", "")
                                 if path_str:
                                     detail = f": {PathLib(path_str).name}"
