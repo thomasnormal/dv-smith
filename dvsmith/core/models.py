@@ -172,7 +172,6 @@ class UVMTest:
     base_class: str
     sequences_used: list[str] = field(default_factory=list)
     description: Optional[str] = None
-    line_number: Optional[int] = None
 
 
 @dataclass
@@ -183,7 +182,6 @@ class UVMSequence:
     file_path: Path
     base_class: str
     description: Optional[str] = None
-    line_number: Optional[int] = None
 
 
 @dataclass
@@ -194,16 +192,14 @@ class UVMCoverageComponent:
     file_path: Path
     base_class: str
     description: Optional[str] = None
-    line_number: Optional[int] = None
+    covergroups: list[str] = field(default_factory=list)
 
 
 @dataclass
 class RepoAnalysis:
-    """Results of repository analysis."""
-
     tests: list[UVMTest] = field(default_factory=list)
     sequences: list[UVMSequence] = field(default_factory=list)
-    covergroups: list[str] = field(default_factory=list)
+    coverage_components: list[UVMCoverageComponent] = field(default_factory=list)
     build_system: Optional[BuildSystem] = None
     detected_simulators: list[Simulator] = field(default_factory=list)
     repo_root: Optional[Path] = None

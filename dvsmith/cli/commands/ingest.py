@@ -4,6 +4,7 @@ import asyncio
 from pathlib import Path
 from typing import Optional
 import subprocess
+import shutil
 
 import typer
 from rich.console import Console
