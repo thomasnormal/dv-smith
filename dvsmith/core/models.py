@@ -187,7 +187,7 @@ class UVMSequence:
 
 
 @dataclass
-class UVMSequence:
+class UVMCoverageComponent:
     """Discovered UVM sequence information."""
 
     name: str
