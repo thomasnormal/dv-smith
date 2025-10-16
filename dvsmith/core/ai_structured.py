@@ -325,7 +325,29 @@ async def query_with_pydantic_response(
                             }
                         )
                         if status_cb:
-                            status_cb(f"tool: {block.name}")
+                            # Show tool with details from actual input
+                            tool_name = block.name
+                            detail = ""
+                            
+                            if tool_name == "Read" and block.input:
+                                path_str = block.input.get("path", "")
+                                if path_str:
+                                    from pathlib import Path
+                                    detail = f": {Path(path_str).name}"
+                            elif tool_name == "Bash" and block.input:
+                                cmd = block.input.get("cmd", "")
+                                if cmd:
+                                    detail = f": {cmd[:40]}" + ("..." if len(cmd) > 40 else "")
+                            elif tool_name == "Glob" and block.input:
+                                pattern = block.input.get("filePattern") or block.input.get("pattern", "")
+                                if pattern:
+                                    detail = f": {pattern}"
+                            elif tool_name == "Grep" and block.input:
+                                pattern = block.input.get("pattern", "")
+                                if pattern:
+                                    detail = f": {pattern[:30]}" + ("..." if len(pattern) > 30 else "")
+                            
+                            status_cb(f"tool: {tool_name}{detail}")
                     elif isinstance(block, ToolResultBlock):
                         content_str = str(block.content) if block.content is not None else ""
                         agent_messages.append(
