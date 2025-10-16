@@ -99,9 +99,6 @@ class Profile(BaseModel):
         description="Profile metadata"
     )
     
-    # Analysis cache (saved to YAML for build command)
-    analysis_cache: Optional[dict] = Field(None, description="Cached analysis results")
-    
     @classmethod
     def from_yaml(cls, path: Path) -> "Profile":
         """Load and validate profile from YAML file.

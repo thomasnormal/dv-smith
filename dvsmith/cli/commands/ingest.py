@@ -94,38 +94,7 @@ def ingest_command(
         
         profile_path = profiles_dir / f"{derived_name}.yaml"
         
-        # Create Profile object with analysis cache
-        from ...core.models import RepoAnalysis
-        
-        # Convert analysis to dict for caching
-        analysis_cache = {
-            "tests": [
-                {
-                    "name": t.name,
-                    "file_path": str(t.file_path.relative_to(repo_path)),
-                    "base_class": t.base_class,
-                    "description": t.description,
-                }
-                for t in analysis.tests
-            ],
-            "sequences": [
-                {
-                    "name": s.name,
-                    "file_path": str(s.file_path.relative_to(repo_path)),
-                    "base_class": s.base_class,
-                }
-                for s in analysis.sequences
-            ],
-            "covergroups": analysis.covergroups,
-            "build_system": analysis.build_system.value,
-            "detected_simulators": [s.value for s in analysis.detected_simulators],
-            "repo_root": str(repo_path),
-            "tests_dir": str(analysis.tests_dir.relative_to(repo_path)) if analysis.tests_dir else None,
-            "sequences_dir": str(analysis.sequences_dir.relative_to(repo_path)) if analysis.sequences_dir else None,
-            "env_dir": str(analysis.env_dir.relative_to(repo_path)) if analysis.env_dir else None,
-            "agents_dir": str(analysis.agents_dir.relative_to(repo_path)) if analysis.agents_dir else None,
-        }
-        
+        # Create Profile (no caching - build will re-analyze if needed)
         profile = Profile(
             name=derived_name,
             repo_url=str(repo_path),
@@ -154,7 +123,6 @@ def ingest_command(
                 "build_system": analysis.build_system.value,
                 "covergroups": analysis.covergroups,
             },
-            analysis_cache=analysis_cache,
         )
         
         profile.to_yaml(profile_path)
