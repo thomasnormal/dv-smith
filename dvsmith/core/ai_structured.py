@@ -264,7 +264,7 @@ async def query_with_pydantic_response(
                     if isinstance(block, TextBlock):
                         agent_messages.append({"type": "text", "text": block.text})
                         if status_cb:
-                            status_cb(f"text: {block.text[:80].strip()}")
+                            status_cb(block.text[:80].strip())
                     elif isinstance(block, ThinkingBlock):
                         agent_messages.append(
                             {
@@ -316,7 +316,7 @@ async def query_with_pydantic_response(
                                 if pattern:
                                     detail = f": {pattern[:30]}" + ("..." if len(pattern) > 30 else "")
                             
-                            status_cb(f"tool: {tool_name}{detail}")
+                            status_cb(f"{tool_name}{detail}")
                     elif isinstance(block, ToolResultBlock):
                         content_str = str(block.content) if block.content is not None else ""
                         agent_messages.append(
