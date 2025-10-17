@@ -1,0 +1,94 @@
+meta:
+  id: cov_awaddr_alignment
+  category: coverage_code
+  scoring: pass_fail
+  simulators: ['questa']
+description: |
+  Title: Add AW Address Alignment Coverpoint and Test It
+
+  Intent
+  - Add a new coverpoint `AWADDR_ALIGNMENT_CP` in master coverage that classifies write addresses
+    as `ALIGNED` vs `UNALIGNED` based on `awaddr % (2**awsize)`.
+  - Add a cross `AWSIZE_CP_X_AWADDR_ALIGNMENT_CP` to correlate size with alignment.
+  - Create a targeted UVM test `axi4_unaligned_awaddr_test` that hits the `UNALIGNED` bin at least once.
+
+  Procedure
+  - Modify `src/hvl_top/master/axi4_master_coverage.sv` to define:
+    - Coverpoint `AWADDR_ALIGNMENT_CP` with bins `ALIGNED`, `UNALIGNED` (derived from `(awaddr % (1<<awsize))==0`).
+    - Cross `AWSIZE_CP_X_AWADDR_ALIGNMENT_CP`.
+  - Author `src/hvl_top/test/axi4_unaligned_awaddr_test.sv` and any needed sequences to generate an
+    unaligned write (and optionally read) transfer.
+  - Include the test in `src/hvl_top/test/axi4_test_pkg.sv`.
+
+  Expected Results
+  - Clean log (no `UVM_FATAL`, `UVM_ERROR`, `Error`).
+  - coverage.txt contains the coverpoint and a nonzero hit for `AWADDR_ALIGNMENT_CP.UNALIGNED`.
+
+root:
+  type: git
+  url: git@github.com:mbits-mirafra/axi4_avip.git
+  commit: 615f0d75555b8d3e28eda40248eb129f31162211
+  patch: |
+    *** Begin Patch
+    *** End Patch
+
+scope:
+  allowed_edits:
+    - src/hvl_top
+
+eval:
+  timeout: 60
+  patch: |
+    *** Begin Patch
+    *** End Patch
+  python: |
+    import os, re, subprocess, sys
+    try:
+        from dvsmith.harness import report_result
+    except Exception:
+        def report_result(success, metrics=None, message=None):
+            print(("PASS" if success else "FAIL"), metrics or {}, message or "")
+
+    QUESTASIM = os.path.join("sim", "questasim")
+    TEST = "axi4_unaligned_awaddr_test"
+
+    def run(cmd, cwd=None):
+        p = subprocess.run(cmd, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        return p.returncode, p.stdout
+
+    # Compile & simulate
+    rc, out = run(["make", "compile", "args=+DATA_WIDTH=32"], cwd=QUESTASIM)
+    if rc != 0:
+        report_result(False, {"stage": "compile"}, out); sys.exit(2)
+    rc, out = run(["make", "simulate", f"test={TEST}", "uvm_verbosity=UVM_LOW", "seed=12345", f"test_folder={TEST}"], cwd=QUESTASIM)
+    log_path = os.path.join(QUESTASIM, TEST, f"{TEST}.log")
+    cov_path = os.path.join(QUESTASIM, TEST, "coverage.txt")
+    if not os.path.exists(log_path):
+        report_result(False, {"stage": "target"}, "missing log"); sys.exit(3)
+    txt = open(log_path, 'r', errors='ignore').read()
+    if re.search(r"UVM_FATAL|UVM_ERROR|\\bError\\b", txt):
+        report_result(False, {"stage": "target"}, "log errors present"); sys.exit(4)
+    if not os.path.exists(cov_path):
+        report_result(False, {"stage": "target"}, "missing coverage.txt"); sys.exit(5)
+    cov = open(cov_path, 'r', errors='ignore').read()
+    if "Coverpoint" not in cov or "AWADDR_ALIGNMENT_CP" not in cov:
+        report_result(False, {"stage": "target"}, "coverpoint AWADDR_ALIGNMENT_CP not found"); sys.exit(6)
+    if "UNALIGNED" not in cov:
+        report_result(False, {"stage": "target"}, "bin UNALIGNED not found"); sys.exit(7)
+    report_result(True)
+    sys.exit(0)
+
+expected_patch: |
+  *** Begin Patch
+  *** Update File: src/hvl_top/master/axi4_master_coverage.sv
+  @@
+     covergroup axi4_master_covergroup with function sample (axi4_master_agent_config cfg, axi4_master_tx packet);
+       option.per_instance = 1;
+  +    // Address alignment derived coverpoint: aligned if awaddr % (2**awsize) == 0
+  +    AWADDR_ALIGNMENT_CP : coverpoint (packet.awaddr % (1 << packet.awsize) == 0) {
+  +      bins ALIGNED   = {1'b1};
+  +      bins UNALIGNED = {1'b0};
+  +    }
+  +    AWSIZE_CP_X_AWADDR_ALIGNMENT_CP : cross AWSIZE_CP, AWADDR_ALIGNMENT_CP;
+  *** End Patch
+

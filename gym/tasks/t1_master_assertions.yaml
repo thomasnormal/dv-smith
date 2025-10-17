@@ -1,0 +1,44 @@
+id: t1_master_assertions
+title: "AXI4 Master: Handshake + Stability Assertions"
+description: |
+  Implement key SystemVerilog Assertions (SVA) for AXI4 master-side channels.
+  Properties must cover:
+  - Address/Data/Response stable when VALID=1 and READY=0
+  - No X/Z on key signals when VALID=1
+  - VALID remains asserted until READY (s_until_with)
+
+  Implement for all five channels: AW, W, B, AR, R.
+
+  Requirements for evaluation:
+  - Each assertion must be labeled exactly as listed in `expected_assert_labels`.
+  - Each assertion must include an explicit else-action: `else $error("ASSERT:<LABEL>");`
+    so the evaluator can reliably detect failures on negative tests.
+
+files_to_create:
+  - path: src/hdl_top/master_assertions.sv
+    from_stub: gym/stubs/master_assertions.sv
+
+eval:
+  type: assertions_master
+  simulator: questa
+  pass_criteria:
+    - Positive subtests produce no ASSERT:<LABEL> errors
+    - Negative subtests produce at least one ASSERT:<LABEL> per label below
+    - Simulation completes without UVM_FATAL/UVM_ERROR
+  expected_assert_labels:
+    - AXI_WA_STABLE_SIGNALS_CHECK
+    - AXI_WA_UNKNOWN_SIGNALS_CHECK
+    - AXI_WA_VALID_STABLE_CHECK
+    - AXI_WD_STABLE_SIGNALS_CHECK
+    - AXI_WD_UNKNOWN_SIGNALS_CHECK
+    - AXI_WD_VALID_STABLE_CHECK
+    - AXI_WR_STABLE_SIGNALS_CHECK
+    - AXI_WR_UNKNOWN_SIGNALS_CHECK
+    - AXI_WR_VALID_STABLE_CHECK
+    - AXI_RA_STABLE_SIGNALS_CHECK
+    - AXI_RA_UNKNOWN_SIGNALS_CHECK
+    - AXI_RA_VALID_STABLE_CHECK
+    - AXI_RD_STABLE_SIGNALS_CHECK
+    - AXI_RD_UNKNOWN_SIGNALS_CHECK
+    - AXI_RD_VALID_STABLE_CHECK
+

@@ -1,0 +1,155 @@
+meta:
+  id: coverage_code_awlen_x_awsize_x_awburst
+  category: test_case
+  scoring: pass_fail
+  simulators: ['xcellium']
+description: |
+  Title: Exercise AWLEN × AWSIZE × AWBURST Coverage
+
+  Intent
+  - Create a directed test that drives a representative set of write/read transfers to stimulate
+    the cross-space of AWLEN (burst length), AWSIZE (transfer size), and AWBURST (burst type) and
+    their read-side counterparts.
+  - Reuse the existing virtual sequences (fixed/incr/wrap and 8/16/32/64-bit variants), or write
+    additional ones as needed, to hit these combinations efficiently.
+
+  Procedure
+  - Implement `src/hvl_top/test/axi4_cross_awlen_awsize_awburst_test.sv` extending `axi4_base_test`.
+  - Start virtual sequences that cover FIXED/INCR/WRAP and 8/16/32/64-byte sizes on both write and read.
+  - Register the test in `src/hvl_top/test/axi4_test_pkg.sv` so it can be run by name.
+
+  Expected Results
+  - Clean log: no `UVM_FATAL`, `UVM_ERROR`, or simulator `Error`.
+  - Scoreboard evidence present for aw/ar len, size, and burst comparisons (e.g.,
+    `SB_awlen_MATCHED`, `SB_awsize_MATCHED`, `SB_awburst_MATCHED`, and read equivalents).
+  - Overall (master, slave) coverage average increases over the `axi4_base_test` baseline.
+root:
+  type: git
+  url: git@github.com:mbits-mirafra/axi4_avip.git
+  commit: 615f0d75555b8d3e28eda40248eb129f31162211
+  patch: |
+    # Optional repository adjustments applied on top of the commit before authoring.
+    # (Left empty for now; use this if you want to sanitize the tree up front.)
+    *** Begin Patch
+    *** End Patch
+scope:
+  allowed_edits:
+    - src/hvl_top
+eval:
+  timeout: 60
+  patch: |
+    # Optional evaluation-time adjustments (e.g., restore instrumentation). Not needed here.
+    *** Begin Patch
+    *** End Patch
+  python: |
+    import os, re, subprocess, sys
+    try:
+        from dvsmith.harness import report_result
+    except Exception:
+        def report_result(success, metrics=None, message=None):
+            print(("PASS" if success else "FAIL"), metrics or {}, message or "")
+
+    QUESTASIM = os.path.join("sim", "cadence_sim")
+    BASE = "axi4_base_test"
+    TEST = "axi4_cross_awlen_awsize_awburst_test"
+
+    def run(cmd, cwd=None):
+        p = subprocess.run(cmd, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        return p.returncode, p.stdout
+
+    # Compile
+    rc, out = run(["make", "clean_compile"], cwd=QUESTASIM)
+    rc, out = run(["make", "compile"], cwd=QUESTASIM)
+    if rc != 0:
+        report_result(False, {"stage": "compile"}, out)
+        sys.exit(2)
+
+    # Baseline
+    base_folder = f"baseline_{BASE}"
+    rc, out = run(["make", "simulate", f"test={BASE}", "uvm_verbosity=UVM_LOW", "seed=12345", f"test_folder={base_folder}"], cwd=QUESTASIM)
+    base_log = os.path.join(QUESTASIM, base_folder, f"{BASE}.log")
+    if not os.path.exists(base_log):
+        report_result(False, {"stage": "baseline"}, "missing baseline log")
+        sys.exit(3)
+    base_txt = open(base_log, 'r', errors='ignore').read()
+    if re.search(r"UVM_FATAL|UVM_ERROR|\\bError\\b", base_txt):
+        report_result(False, {"stage": "baseline"}, "baseline log contains errors")
+        sys.exit(4)
+
+    def extract_cov(txt):
+        mm = re.search(r"AXI4 Master Agent Coverage\s*=\s*([0-9]+\.?[0-9]*)\s*%", txt)
+        ms = re.search(r"AXI4 Slave Agent Coverage\s*=\s*([0-9]+\.?[0-9]*)\s*%", txt)
+        m = float(mm.group(1)) if mm else 0.0
+        s = float(ms.group(1)) if ms else 0.0
+        return m, s, (m + s) / 2.0
+
+    bm, bs, bavg = extract_cov(base_txt)
+
+    # Target
+    tgt_folder = TEST
+    rc, out = run(["make", "simulate", f"test={TEST}", "uvm_verbosity=UVM_LOW", "seed=12345", f"test_folder={tgt_folder}"], cwd=QUESTASIM)
+    tgt_log = os.path.join(QUESTASIM, tgt_folder, f"{TEST}.log")
+    if not os.path.exists(tgt_log):
+        report_result(False, {"stage": "target"}, "missing target log")
+        sys.exit(5)
+    tgt_txt = open(tgt_log, 'r', errors='ignore').read()
+    if re.search(r"UVM_FATAL|UVM_ERROR|\\bError\\b", tgt_txt):
+        report_result(False, {"stage": "target"}, "target log contains errors")
+        sys.exit(6)
+
+    # Evidence: scoreboard comparisons seen for len/size/burst
+    evid = [r"SB_awlen_MATCHED", r"SB_awsize_MATCHED", r"SB_awburst_MATCHED",
+            r"SB_arlen_MATCHED", r"SB_arsize_MATCHED", r"SB_arburst_MATCHED"]
+    missing = [p for p in evid if not re.search(p, tgt_txt)]
+    if missing:
+        report_result(False, {"stage": "target", "missing": missing}, "scoreboard evidence missing")
+        sys.exit(7)
+
+    tm, ts, tavg = extract_cov(tgt_txt)
+    if tavg <= bavg + 1.0:  # require at least some improvement over baseline
+        report_result(False, {"baseline_avg": bavg, "target_avg": tavg}, "insufficient coverage improvement")
+        sys.exit(8)
+
+    report_result(True, {"baseline_avg": bavg, "target_avg": tavg})
+    sys.exit(0)
+expected_patch: |
+  *** Begin Patch
+  *** Add File: src/hvl_top/test/axi4_cross_awlen_awsize_awburst_test.sv
+  +`ifndef AXI4_CROSS_AWLEN_AWSIZE_AWBURST_TEST_INCLUDED_
+  +`define AXI4_CROSS_AWLEN_AWSIZE_AWBURST_TEST_INCLUDED_
+  +class axi4_cross_awlen_awsize_awburst_test extends axi4_base_test;
+  +  `uvm_component_utils(axi4_cross_awlen_awsize_awburst_test)
+  +  axi4_virtual_bk_incr_burst_write_read_seq  v_incr;
+  +  axi4_virtual_bk_wrap_burst_write_read_seq  v_wrap;
+  +  axi4_virtual_bk_fixed_burst_write_read_seq v_fixed;
+  +  axi4_virtual_bk_8b_write_read_seq          v_8b;
+  +  axi4_virtual_bk_16b_write_read_seq         v_16b;
+  +  axi4_virtual_bk_32b_write_read_seq         v_32b;
+  +  axi4_virtual_bk_64b_write_read_seq         v_64b;
+  +  function new(string name = "axi4_cross_awlen_awsize_awburst_test", uvm_component parent = null);
+  +    super.new(name, parent);
+  +  endfunction : new
+  +  task run_phase(uvm_phase phase);
+  +    phase.raise_objection(this);
+  +    v_fixed = axi4_virtual_bk_fixed_burst_write_read_seq ::type_id::create("v_fixed");
+  +    v_incr  = axi4_virtual_bk_incr_burst_write_read_seq  ::type_id::create("v_incr");
+  +    v_wrap  = axi4_virtual_bk_wrap_burst_write_read_seq  ::type_id::create("v_wrap");
+  +    v_8b    = axi4_virtual_bk_8b_write_read_seq          ::type_id::create("v_8b");
+  +    v_16b   = axi4_virtual_bk_16b_write_read_seq         ::type_id::create("v_16b");
+  +    v_32b   = axi4_virtual_bk_32b_write_read_seq         ::type_id::create("v_32b");
+  +    v_64b   = axi4_virtual_bk_64b_write_read_seq         ::type_id::create("v_64b");
+  +    fork
+  +      begin v_fixed.start(axi4_env_h.axi4_virtual_seqr_h); end
+  +      begin v_incr .start(axi4_env_h.axi4_virtual_seqr_h); end
+  +      begin v_wrap .start(axi4_env_h.axi4_virtual_seqr_h); end
+  +      begin v_8b   .start(axi4_env_h.axi4_virtual_seqr_h); end
+  +      begin v_16b  .start(axi4_env_h.axi4_virtual_seqr_h); end
+  +      begin v_32b  .start(axi4_env_h.axi4_virtual_seqr_h); end
+  +      begin v_64b  .start(axi4_env_h.axi4_virtual_seqr_h); end
+  +    join_any
+  +    #1000ns;
+  +    phase.drop_objection(this);
+  +  endtask : run_phase
+  +endclass : axi4_cross_awlen_awsize_awburst_test
+  +`endif
+  *** End Patch

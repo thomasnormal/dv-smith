@@ -1,0 +1,15 @@
+id: closure_40pct_60s
+kind: coverage_closure
+description_md: gym/tasks/closure_40pct_60s/description.md
+allowed_edits:
+  - src/hvl_top/test/**
+  - src/hvl_top/test/sequences/**
+  - src/hvl_top/test/virtual_sequences/**
+eval:
+  script: gym/eval/check_closure.py
+  args:
+    - axi4_closure_test
+    - --threshold
+    - "40"
+    - --timeout_s
+    - "60"

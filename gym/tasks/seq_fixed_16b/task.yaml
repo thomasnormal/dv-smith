@@ -1,0 +1,15 @@
+id: seq_fixed_16b
+kind: sequence_test_creation
+description_md: gym/tasks/axi4_blocking_fixed_16b_write_read_test.md
+allowed_edits:
+  - src/hvl_top/test/**
+  - src/hvl_top/test/sequences/**
+  - src/hvl_top/test/virtual_sequences/**
+eval:
+  script: gym/eval/eval_one.py
+  args:
+    - axi4_blocking_fixed_16b_write_read_test
+  baseline_test: axi4_base_test
+notes:
+  - Scoreboard evidence and coverage bins are checked.
+  - Baseline control ensures evidence is absent when test is not run.
