@@ -176,7 +176,7 @@ def _tool_status_line(tool_name: str, tool_input: dict[str, Any] | None) -> Opti
     if tool_name == "Read":
         path_str = tool_input.get('path') or tool_input.get('file_path')
         if path_str:
-            return f"{tool_name}: {Path(path_str).name}"
+            return f"{tool_name}: {Path(path_str)}"
     elif tool_name == "Bash":
         cmd = (
             tool_input.get("cmd")
@@ -222,6 +222,47 @@ def _load_payload_from_path(path_value: str, base_dir: Path) -> Any:
             return json.load(f)
     except json.JSONDecodeError as exc:
         raise ValueError(f"Payload file {target_path} does not contain valid JSON") from exc
+
+
+def _normalize_payload_enums(payload: Any) -> Any:
+    """Lowercase enum string values for known fields."""
+    if isinstance(payload, dict):
+        normalized = payload.copy()
+        if isinstance(normalized.get("build_system"), str):
+            normalized["build_system"] = normalized["build_system"].lower()
+        if isinstance(normalized.get("detected_simulators"), list):
+            normalized["detected_simulators"] = [
+                value.lower() if isinstance(value, str) else value
+                for value in normalized["detected_simulators"]
+            ]
+        if isinstance(normalized.get("coverage_components"), list):
+            normalized["coverage_components"] = [
+                _normalize_payload_enums(item) if isinstance(item, dict) else item
+                for item in normalized["coverage_components"]
+            ]
+        return normalized
+    return payload
+
+
+def _extract_payload(tool_input: dict[str, Any], base_dir: Path) -> Any:
+    """Return payload data based on FinalAnswer tool input."""
+    has_path = bool(tool_input.get("payload_path"))
+    has_object = "payload_object" in tool_input and tool_input["payload_object"] is not None
+
+    if has_path and has_object:
+        raise ValueError("Provide either payload_path or payload_object, not both.")
+    if not has_path and not has_object:
+        raise ValueError(
+            "FinalAnswer must include either `payload_object` (inline JSON) or "
+            "`payload_path` (path to JSON file)."
+        )
+
+    if has_path:
+        data = _load_payload_from_path(tool_input["payload_path"], base_dir)
+    else:
+        data = tool_input["payload_object"]
+
+    return _normalize_payload_enums(data)
 
 
 def _handle_assistant_message(
@@ -296,36 +337,35 @@ async def query_with_pydantic_response(
         system_prompt: Additional system prompt context
         cwd: Working directory
         status_cb: Optional callback for live status updates
-        postprocess: Optional function to post-process validated result
 
     Returns:
         Validated instance of response_model (after optional postprocess)
     """
     schema, validate_payload, response_model_name = _make_adapter(response_model)
     model_properties = dict(schema.get("properties", {}))
-    required_fields = list(schema.get("required", []))
     tool_schema = {
-        "oneOf": [
-            {
+        "type": "object",
+        "properties": {
+            "payload_object": {
                 "type": "object",
+                "description": (
+                    "Final response payload as a JSON object that matches the schema. "
+                    "Use this to return the fields inline."
+                ),
                 "properties": model_properties,
-                "required": required_fields,
-            },
-            {
-                "type": "object",
-                "properties": {
-                    "payload_path": {
-                        "type": "string",
-                        "description": (
-                            "Absolute or relative path to a JSON file that contains the "
-                            "final response payload."
-                        ),
-                    }
-                },
-                "required": ["payload_path"],
+                "required": list(schema.get("required", [])),
                 "additionalProperties": False,
             },
-        ]
+            "payload_path": {
+                "type": "string",
+                "description": (
+                    "Absolute or relative path to a JSON file that contains the "
+                    "final response payload."
+                ),
+            },
+        },
+        "required": [],
+        "additionalProperties": False,
     }
 
     base_dir = Path(cwd or ".").expanduser().resolve()
@@ -340,7 +380,8 @@ async def query_with_pydantic_response(
     @tool(
         "FinalAnswer",
         "Return the final answer as JSON that matches the required schema. "
-        "Pass the fields directly as tool parameters, not wrapped in any container.",
+        "Provide either `payload_object` containing the fields inline or `payload_path` "
+        "with a JSON file path. Use exactly one of these options.",
         tool_schema,
     )
     async def final_answer(_: dict[str, Any]) -> dict[str, Any]:
@@ -352,19 +393,25 @@ async def query_with_pydantic_response(
         _ctx: HookContext,
     ) -> dict[str, Any]:
         nonlocal final_obj
-        if input_data.get("tool_name") == "mcp__answer__FinalAnswer":
-            tool_input = input_data.get("tool_input", {})
-            if "payload_path" in tool_input:
-                extra_keys = [key for key in tool_input.keys() if key != "payload_path"]
-                if extra_keys:
-                    raise ValueError(
-                        "FinalAnswer must provide either payload_path or direct fields, not both."
-                    )
-                payload_data = _load_payload_from_path(tool_input["payload_path"], base_dir)
-            else:
-                payload_data = tool_input
+        if input_data.get("tool_name") != "mcp__answer__FinalAnswer":
+            return {}
+
+        tool_input = input_data.get("tool_input", {})
+        try:
+            payload_data = _extract_payload(tool_input, base_dir)
             final_obj = validate_payload(payload_data)
-        return {}
+            return {}
+        except Exception as exc:
+            logger.error("Failed to process FinalAnswer payload: %s", exc)
+            return {
+                "error": {
+                    "message": (
+                        "Error loading the FinalAnswer payload.\n"
+                        f"{exc}\n"
+                        "Please correct the issue and call FinalAnswer again."
+                    )
+                }
+            }
 
     async def enforce_final_before_stop(
         input_data: dict[str, Any],
@@ -384,8 +431,9 @@ async def query_with_pydantic_response(
     answer_server = create_sdk_mcp_server(name="answer", tools=[final_answer])
     full_system_prompt = system_prompt + (
         "\n\nWhen you are done with your analysis, call the `FinalAnswer` tool exactly once with "
-        "the final JSON payload that matches the provided schema. You may either pass the fields "
-        "directly, or provide `payload_path` pointing to a JSON file that contains the full payload."
+        "the final JSON payload that matches the provided schema. Use `payload_object` to return the "
+        "fields inline, or `payload_path` to provide the path to a JSON file with the payload. "
+        "Do not include both parameters at once."
     )
     options = ClaudeAgentOptions(
         system_prompt=full_system_prompt,
@@ -414,9 +462,6 @@ async def query_with_pydantic_response(
                     {"type": type(message).__name__, "raw": str(message)}
                 )
 
-            if final_obj is not None:
-                break
-
     duration_ms = (time.time() - start_time) * 1000
     if final_obj is None:
         error_msg = "Claude finished without calling FinalAnswer"
@@ -433,7 +478,6 @@ async def query_with_pydantic_response(
             "Check that the prompt is clear about calling FinalAnswer."
         )
 
-    result_obj = postprocess(final_obj) if postprocess else final_obj
     log_ai_call(
         prompt=prompt,
         response_model_name=response_model_name,

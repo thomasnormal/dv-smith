@@ -1,17 +1,17 @@
 """Ingest command - analyze repository and create profile."""
 
 import asyncio
+import shutil
+import subprocess
 from pathlib import Path
 from typing import Optional
-import subprocess
-import shutil
 
 import typer
 from rich.console import Console
 from rich.table import Table
 
-from ...core.ai_analyzer import AIRepoAnalyzer
 from ...config import Profile
+from ...core.ai_analyzer import AIRepoAnalyzer
 from ..live_feed import with_live_agent_feed
 
 
@@ -64,9 +64,8 @@ def ingest_command(
             repo_path = Path(repo_url)
         
         # Run AI analysis with live agent feed
-        analyzer = AIRepoAnalyzer(repo_root=repo_path)
         analysis = await with_live_agent_feed(
-            analyzer.analyze,
+            AIRepoAnalyzer(repo_root=repo_path).analyze,
             console,
             title="Analyzing Repository",
             show_progress=False
@@ -93,10 +92,9 @@ def ingest_command(
         # Save profile
         profiles_dir = workspace / "profiles"
         profiles_dir.mkdir(parents=True, exist_ok=True)
-        
         profile_path = profiles_dir / f"{derived_name}.yaml"
         
-        # Create Profile (no caching - build will re-analyze if needed)
+        # Create Profile with cached analysis path
         profile = Profile(
             name=derived_name,
             repo_url=str(repo_path),
@@ -124,6 +122,7 @@ def ingest_command(
                 "covergroup_count": len(covergroup_names),
                 "build_system": build_system_value,
                 "covergroups": covergroup_names,
+                "analysis": analysis.to_dict(),
             },
         )
         

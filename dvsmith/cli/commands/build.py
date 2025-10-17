@@ -13,6 +13,7 @@ from rich.table import Table
 from ...config import Profile
 from ...core.ai_analyzer import AIRepoAnalyzer
 from ...core.ai_structured import query_with_pydantic_response
+from ...core.models import RepoAnalysis
 from ...core.task_generator import TaskGenerator
 from ..live_feed import with_live_agent_feed
 
@@ -46,10 +47,20 @@ def build_command(
         
         console.print(f"[cyan]Repository:[/] {repo_path}")
         
-        # Re-analyze repository (fast, ensures fresh data)
-        with console.status("[cyan]Analyzing repository..."):
-            analyzer = AIRepoAnalyzer(repo_root=repo_path)
-            analysis = await analyzer.analyze(show_progress=False)
+        analyzer = AIRepoAnalyzer(repo_root=repo_path)
+        analysis: Optional[RepoAnalysis] = None
+        if profile.metadata.analysis:
+            try:
+                analysis = RepoAnalysis.from_dict(profile.metadata.analysis, repo_root=repo_path)
+                analysis = analyzer._anchor_paths(analysis)
+                console.print("[cyan]Using cached analysis embedded in profile[/]")
+            except Exception as exc:
+                console.print(f"[yellow]⚠ Failed to load cached analysis ({exc}). Re-running.[/]")
+                analysis = None
+
+        if analysis is None:
+            with console.status("[cyan]Analyzing repository..."):
+                analysis = await analyzer.analyze(show_progress=False)
         
         # Setup gym structure
         gym_dir = workspace / "gyms" / name
@@ -124,7 +135,8 @@ Explore files and decide what to keep vs remove.
                 system_prompt="You are an expert at UVM testbench structure.",
                 cwd=str(gym_dir)
             )
-        
+
+
         # Execute cleanup
         if analysis.tests_dir:
             if analysis.tests_dir.is_absolute():

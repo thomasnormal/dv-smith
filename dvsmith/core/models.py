@@ -172,6 +172,7 @@ class UVMTest(BaseModel):
     base_class: str
     sequences_used: List[str] = Field(default_factory=list)
     description: Optional[str] = None
+    line_number: Optional[int] = None
 
 
 class UVMSequence(BaseModel):
@@ -181,6 +182,7 @@ class UVMSequence(BaseModel):
     file_path: Path
     base_class: str
     description: Optional[str] = None
+    line_number: Optional[int] = None
 
 
 @dataclass

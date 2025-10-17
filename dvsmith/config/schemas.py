@@ -72,6 +72,10 @@ class ProfileMetadata(BaseModel):
     covergroup_count: int = Field(default=0)
     build_system: str = Field(default="makefile")
     covergroups: List[str] = Field(default_factory=list)
+    analysis: Optional[dict] = Field(
+        default=None,
+        description="Cached RepoAnalysis data for reuse"
+    )
 
 
 class Profile(BaseModel):

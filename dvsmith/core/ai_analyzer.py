@@ -63,11 +63,10 @@ Be thorough—use the tools to explore!
         analysis = await query_with_pydantic_response(
             prompt=prompt,
             response_model=RepoAnalysis,
-            system_prompt="You are an expert in SystemVerilog/UVM repository analysis. Return complete RepoAnalysis via FinalAnswer.",
             cwd=str(self.repo_root),
             status_cb=status_cb,
-            postprocess=lambda obj: self._anchor_paths(obj)
         )
+        analysis = self._anchor_paths(analysis)
 
         return analysis
 
