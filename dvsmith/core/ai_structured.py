@@ -18,10 +18,15 @@ from filelock import FileLock
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 from claude_agent_sdk import (
+    CLIConnectionError,
+    CLIJSONDecodeError,
+    CLINotFoundError,
     ClaudeAgentOptions,
     ClaudeSDKClient,
+    ClaudeSDKError,
     HookContext,
     HookMatcher,
+    ProcessError,
     create_sdk_mcp_server,
     tool,
 )
@@ -150,7 +155,7 @@ def _make_adapter(model: Any) -> Tuple[dict[str, Any], Callable[[Any], Any], str
         Tuple of (schema dict, validation function, model name)
     """
     if isinstance(model, type) and issubclass(model, BaseModel):
-        schema: dict[str, Any] = model.model_json_schema()
+        full_schema: dict[str, Any] = model.model_json_schema()
 
         def validate(data: Any) -> Any:
             return model.model_validate(data)
@@ -159,13 +164,35 @@ def _make_adapter(model: Any) -> Tuple[dict[str, Any], Callable[[Any], Any], str
     else:
         # Use TypeAdapter for dataclasses and other types
         ta = TypeAdapter(model)
-        schema = ta.json_schema()
+        full_schema = ta.json_schema()
 
         def validate(data: Any) -> Any:
             return ta.validate_python(data)
 
         model_name = getattr(model, "__name__", str(model))
+    schema = _flatten_json_schema(full_schema)
     return schema, validate, model_name
+
+
+def _flatten_json_schema(schema: dict[str, Any]) -> dict[str, Any]:
+    """Inline $defs references to make schema MCP-compatible."""
+
+    schema_copy = json.loads(json.dumps(schema))  # deep copy to avoid mutation
+    defs = schema_copy.pop("$defs", {}) or {}
+
+    def resolve(node: Any) -> Any:
+        if isinstance(node, dict):
+            ref = node.get("$ref")
+            if isinstance(ref, str) and ref.startswith("#/$defs/"):
+                key = ref.split("/")[-1]
+                if key in defs:
+                    return resolve(json.loads(json.dumps(defs[key])))
+            return {k: resolve(v) for k, v in node.items() if k != "$ref"}
+        if isinstance(node, list):
+            return [resolve(item) for item in node]
+        return node
+
+    return resolve(schema_copy)
 
 
 def _tool_status_line(tool_name: str, tool_input: dict[str, Any] | None) -> Optional[str]:
@@ -314,7 +341,17 @@ def _handle_assistant_message(
 @retry(
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=1, min=2, max=10),
-    retry=retry_if_exception_type((ConnectionError, TimeoutError)),
+    retry=retry_if_exception_type(
+        (
+            ConnectionError,
+            TimeoutError,
+            CLIConnectionError,
+            CLIJSONDecodeError,
+            ProcessError,
+            ClaudeSDKError,
+            CLINotFoundError,
+        )
+    ),
     reraise=True,
 )
 async def query_with_pydantic_response(
@@ -342,19 +379,16 @@ async def query_with_pydantic_response(
         Validated instance of response_model (after optional postprocess)
     """
     schema, validate_payload, response_model_name = _make_adapter(response_model)
-    model_properties = dict(schema.get("properties", {}))
+    payload_schema = json.loads(json.dumps(schema))
     tool_schema = {
         "type": "object",
         "properties": {
             "payload_object": {
-                "type": "object",
+                "anyOf": [payload_schema],
                 "description": (
-                    "Final response payload as a JSON object that matches the schema. "
-                    "Use this to return the fields inline."
+                    "Final response payload that matches the required schema. "
+                    "Provide fields inline here."
                 ),
-                "properties": model_properties,
-                "required": list(schema.get("required", [])),
-                "additionalProperties": False,
             },
             "payload_path": {
                 "type": "string",
@@ -430,6 +464,20 @@ async def query_with_pydantic_response(
 
     answer_server = create_sdk_mcp_server(name="answer", tools=[final_answer])
     full_system_prompt = system_prompt + (
+        # Enable this to increase tool call parallelism:
+        # Based on https://docs.claude.com/en/docs/build-with-claude/prompt-engineering/claude-4-best-practices#optimize-parallel-tool-calling
+        # Sample prompt for maximum parallel efficiency:
+        # "\n\n<use_parallel_tool_calls>"
+        # "If you intend to call multiple tools and there are no dependencies between the "
+        # "tool calls, make all of the independent tool calls in parallel. Prioritize calling "
+        # "tools simultaneously whenever the actions can be done in parallel rather than "
+        # "sequentially. For example, when reading 3 files, run 3 tool calls in parallel to "
+        # "read all 3 files into context at the same time. Maximize use of parallel tool calls "
+        # "where possible to increase speed and efficiency. However, if some tool calls depend "
+        # "on previous calls to inform dependent values like the parameters, do NOT call these "
+        # "tools in parallel and instead call them sequentially. Never use placeholders or "
+        # "guess missing parameters in tool calls."
+        # "</use_parallel_tool_calls>"
         "\n\nWhen you are done with your analysis, call the `FinalAnswer` tool exactly once with "
         "the final JSON payload that matches the provided schema. Use `payload_object` to return the "
         "fields inline, or `payload_path` to provide the path to a JSON file with the payload. "
@@ -477,6 +525,8 @@ async def query_with_pydantic_response(
             "Claude finished without calling FinalAnswer. "
             "Check that the prompt is clear about calling FinalAnswer."
         )
+
+    result_obj = final_obj
 
     log_ai_call(
         prompt=prompt,
