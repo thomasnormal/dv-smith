@@ -8,7 +8,13 @@ This file helps AI coding agents (like Amp, Cursor, etc.) work effectively with 
 
 ```bash
 # The project uses uv for package management
-uv pip install -e .
+uv sync  # Install dependencies including terminal-bench
+
+# Run CLI commands
+python -m dvsmith.cli.app --help
+python -m dvsmith.cli.app ingest <repo>
+python -m dvsmith.cli.app build <profile-name> --agent-concurrency 3
+python -m dvsmith.cli.app ai-logs  # View AI agent activity logs
 
 # Run tests
 pytest tests/
@@ -19,21 +25,40 @@ mypy dvsmith/
 # Code formatting
 black dvsmith/
 ruff check dvsmith/
+
+# Terminal-bench CLI (installed via local dependency)
+tb --help
+tb check .
 ```
 
-### Running the CLI
+### Project Structure
 
-```bash
-# New Typer CLI (preferred)
-python -m dvsmith.cli.app --help
-python -m dvsmith.cli.app ingest <repo-url>
-python -m dvsmith.cli.app list-profiles
+- `dvsmith/cli/` - Command-line interface (Typer-based)
+- `dvsmith/core/` - Core logic (AI analysis, task generation, models)
+- `dvsmith/flows/` - Prefect workflow orchestration
+- `terminal-bench/` - Terminal-Bench subproject (local editable dependency)
+  - Provides the `tb` CLI tool for task validation
 
-# Old CLI (deprecated, but still works)
-python -m dvsmith.cli --help
-```
+### Dependencies
 
-## Architecture
+- **Python 3.12+** required (terminal-bench requirement)
+- **terminal-bench** installed as local editable dependency from `terminal-bench/` directory
+- Uses `uv` for package management (faster than pip)
+- Key dependencies: claude-agent-sdk, anthropic, prefect, typer, rich, pydantic
+
+### Use Test Driven Development
+
+Test first: Whenever I tell you to fix a bug, don't immediately start trying to fix it, instead:
+1) Think about what might have caused the bug.
+2) Make a unit test (pytest) to try and replicate the bug.
+   - The new test should FAIL if you were succesful.
+   - Don't make the test too specific, but think about the general assumption that was violated.
+   - Keep iterating until you succeed and feel confident that the bug your test triggers
+     matches the bug I told you to fix.
+3) Only then update the code to actully fix the bug.
+4) Check that your solution makes the test PASS.
+   Otherwise consider if your test or your solution was wrong.
+
 
 ### Async Pattern
 
@@ -100,6 +125,11 @@ from ..config import Profile
 from ..core.models import RepoAnalysis
 from .live_feed import with_live_agent_feed
 ```
+
+Don't use `from __future__ import ...` we're using python3.12, and if
+you're getting errors about annotations, it's likely just that you didn't
+enable the venv.
+
 
 **Rules:**
 - ✅ All imports at the top (no imports inside functions)
@@ -190,94 +220,3 @@ def my_command(
     asyncio.run(run())
 ```
 
-### Adding a New Simulator Adapter
-
-1. Create `dvsmith/adapters/sim/my_simulator.py`
-2. Implement `SimulatorAdapter` interface
-3. Register in `dvsmith/adapters/sim/__init__.py`:
-
-```python
-from .my_simulator import MySimulatorAdapter
-
-SimulatorRegistry.register(Simulator.MY_SIM, MySimulatorAdapter)
-```
-
-### Making a Function Async
-
-When you need to call async functions:
-
-```python
-# 1. Make your function async
-async def my_function():
-    result = await some_async_call()
-    return result
-
-# 2. Update callers to await it
-result = await my_function()
-
-# 3. If caller is at top level (CLI), use asyncio.run()
-asyncio.run(my_function())
-```
-
-## File Structure
-
-```
-dvsmith/
-├── cli/                    # CLI commands (Typer)
-│   ├── __init__.py
-│   └── app.py             # Main Typer app
-├── config/                # Configuration
-│   ├── __init__.py
-│   ├── logging.py         # Logging setup
-│   └── schemas.py         # Pydantic models
-├── core/                  # Core domain logic
-│   ├── ai_analyzer.py     # AI-powered analysis (ASYNC)
-│   ├── ai_structured.py   # Pydantic AI calls (ASYNC)
-│   ├── models.py          # Data models
-│   └── task_generator.py  # Task generation
-├── adapters/              # Simulator/tool adapters
-│   ├── sim/              # Simulator adapters
-│   └── cov/              # Coverage adapters
-└── harness/              # Evaluation harness
-```
-
-## Dependencies
-
-### Core
-- `claude-agent-sdk` - AI agent SDK
-- `anthropic` - Anthropic API
-- `pydantic` - Data validation
-- `pydantic-settings` - Config validation
-
-### CLI & UX
-- `typer` - CLI framework
-- `rich` - Terminal formatting
-- `tqdm` - Progress bars
-
-### Reliability
-- `tenacity` - Retry logic
-- `filelock` - Thread-safe file operations
-
-## Conventions
-
-1. **Async by default** in library code
-2. **Type hints everywhere** - helps IDEs and mypy
-3. **Pydantic for data** - validation + serialization
-4. **Rich for CLI output** - no raw print() statements
-5. **Logger over print** - use configured logger
-
-## AI-Specific Notes
-
-When working with AI calls:
-
-- All AI calls are in `dvsmith/core/ai_structured.py`
-- They automatically retry on transient failures
-- Logging to `~/.dvsmith/ai_calls.jsonl` is thread-safe
-- Use `query_with_pydantic_response()` for structured responses
-
-## Questions?
-
-Check:
-- `docs/CLI_MIGRATION.md` - CLI migration guide
-- `docs/claude-code-sdk.md` - Claude SDK documentation  
-- `docs/testbenches.md` - Available test benches

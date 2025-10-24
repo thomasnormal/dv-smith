@@ -22,6 +22,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Import commands
+from .commands.ai_logs import ai_logs_command
 from .commands.ingest import ingest_command
 from .commands.build import build_command
 from .commands.profile_commands import list_profiles_command, validate_profile_command, info_command
@@ -54,6 +55,7 @@ def main_callback(
     pass
 
 # Register commands
+app.command(name="ai-logs")(ai_logs_command)
 app.command(name="ingest")(ingest_command)
 app.command(name="build")(build_command)
 app.command(name="run")(run_command)

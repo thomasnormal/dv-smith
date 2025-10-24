@@ -361,6 +361,7 @@ async def query_with_pydantic_response(
     cwd: str = ".",
     status_cb: Optional[Callable[[str], None]] = None,
     postprocess: Optional[Callable[[Any], Any]] = None,
+    allowed_tools: Optional[list[str]] = None,
 ) -> Any:
     """
     Query Claude and get a structured response (Pydantic model or dataclass).
@@ -374,6 +375,8 @@ async def query_with_pydantic_response(
         system_prompt: Additional system prompt context
         cwd: Working directory
         status_cb: Optional callback for live status updates
+        postprocess: Optional function to transform the result
+        allowed_tools: Optional list of tool names to allow (e.g., ["Read", "Write", "Bash"])
 
     Returns:
         Validated instance of response_model (after optional postprocess)
@@ -494,6 +497,7 @@ async def query_with_pydantic_response(
             ],
             "Stop": [HookMatcher(hooks=[enforce_final_before_stop])],
         },
+        allowed_tools=allowed_tools,
     )
 
     async with ClaudeSDKClient(options=options) as client:

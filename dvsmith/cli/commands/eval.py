@@ -5,9 +5,6 @@ from pathlib import Path
 import typer
 from rich.console import Console
 
-from ...config import Profile
-
-
 console = Console()
 
 

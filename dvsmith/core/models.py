@@ -1,5 +1,7 @@
 """Core data models for dv-smith."""
 
+from __future__ import annotations
+
 import contextlib
 import json
 from pydantic import BaseModel, Field, ConfigDict
@@ -18,6 +20,16 @@ class Simulator(str, Enum):
     VERILATOR = "verilator"
     DSIM = "dsim"
 
+    @classmethod
+    def _missing_(cls, value: object) -> "Simulator" | None:  # type: ignore[override]
+        """Allow case-insensitive matching."""
+        if isinstance(value, str):
+            value_lower = value.lower()
+            for member in cls:
+                if member.value == value_lower:
+                    return member
+        return None
+
 
 class BuildSystem(str, Enum):
     """Detected build system types."""
@@ -27,6 +39,16 @@ class BuildSystem(str, Enum):
     DVSIM = "dvsim"
     FUSESOC = "fusesoc"
     CUSTOM = "custom"
+
+    @classmethod
+    def _missing_(cls, value: object) -> "BuildSystem" | None:  # type: ignore[override]
+        """Allow case-insensitive matching."""
+        if isinstance(value, str):
+            value_lower = value.lower()
+            for member in cls:
+                if member.value == value_lower:
+                    return member
+        return None
 
 
 class TaskCategory(str, Enum):
@@ -204,6 +226,15 @@ class RepoAnalysis(BaseModel):
     build_system: Optional[BuildSystem] = None
     detected_simulators: List[Simulator] = Field(default_factory=list)
     repo_root: Optional[Path] = None
+    git_remote: Optional[str] = None
+    git_commit: Optional[str] = None
+    git_branch: Optional[str] = None
+
+    assertion_files: List[Path] = Field(default_factory=list)
+    coverage_files: List[Path] = Field(default_factory=list)
+    test_files: List[Path] = Field(default_factory=list)
+    sparse_include: List[str] = Field(default_factory=list)
+    sparse_exclude: List[str] = Field(default_factory=list)
 
     # Path hints
     tests_dir: Optional[Path] = None
@@ -217,6 +248,14 @@ class RepoAnalysis(BaseModel):
 
     def to_dict(self) -> dict:
         """Serialize to dictionary for caching."""
+        def _path_to_str(path: Path) -> str:
+            if self.repo_root and path.is_absolute():
+                try:
+                    return str(path.relative_to(self.repo_root))
+                except ValueError:
+                    return str(path)
+            return str(path)
+
         return {
             "tests": [
                 {
@@ -253,6 +292,14 @@ class RepoAnalysis(BaseModel):
             "build_system": self.build_system.value if self.build_system else None,
             "detected_simulators": [s.value for s in self.detected_simulators],
             "repo_root": str(self.repo_root) if self.repo_root else None,
+            "git_remote": self.git_remote,
+            "git_commit": self.git_commit,
+            "git_branch": self.git_branch,
+            "assertion_files": [_path_to_str(p) for p in self.assertion_files],
+            "coverage_files": [_path_to_str(p) for p in self.coverage_files],
+            "test_files": [_path_to_str(p) for p in self.test_files],
+            "sparse_include": self.sparse_include,
+            "sparse_exclude": self.sparse_exclude,
             "tests_dir": str(self.tests_dir) if self.tests_dir else None,
             "sequences_dir": str(self.sequences_dir) if self.sequences_dir else None,
             "env_dir": str(self.env_dir) if self.env_dir else None,
@@ -305,6 +352,14 @@ class RepoAnalysis(BaseModel):
             build_system=BuildSystem(data["build_system"]) if data.get("build_system") else None,
             detected_simulators=[Simulator(s) for s in data.get("detected_simulators", [])],
             repo_root=root,
+            git_remote=data.get("git_remote"),
+            git_commit=data.get("git_commit"),
+            git_branch=data.get("git_branch"),
+            assertion_files=[Path(p) for p in data.get("assertion_files", [])],
+            coverage_files=[Path(p) for p in data.get("coverage_files", [])],
+            test_files=[Path(p) for p in data.get("test_files", [])],
+            sparse_include=data.get("sparse_include", []),
+            sparse_exclude=data.get("sparse_exclude", []),
             tests_dir=Path(data["tests_dir"]) if data.get("tests_dir") else None,
             sequences_dir=Path(data["sequences_dir"]) if data.get("sequences_dir") else None,
             env_dir=Path(data["env_dir"]) if data.get("env_dir") else None,

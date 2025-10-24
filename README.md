@@ -27,8 +27,9 @@ DV-Smith is a **DV gym generator** that:
 
 ### Prerequisites
 
-- Python 3.10+
-- Cadence Xcelium
+- Python 3.12+
+- Docker (required by Terminal-Bench)
+- Anthropic API key
 
 ### Installation
 
@@ -37,44 +38,36 @@ git clone https://github.com/yourusername/dv-smith.git
 cd dv-smith
 
 # Install with uv (recommended)
-uv venv
+uv sync
 source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-uv pip install -e .
-
-# Or with pip
-python -m venv .venv
-source .venv/bin/activate
-pip install -e .
 
 # Required: Set Anthropic API key for Claude-powered analysis
 echo "ANTHROPIC_API_KEY=your-key-here" > .env
 ```
 
 
-### Create Your First DV Gym
+### Create Your First Terminal-Bench Tasks
 
 ```bash
-# 1. Ingest a UVM repository
+# 1. Ingest and analyze a UVM repository
 dvsmith ingest https://github.com/mbits-mirafra/apb_avip
 
-# 2. Build the gym (single simulator)
-dvsmith build apb_avip --sim xcelium
+# 2. Build Terminal-Bench tasks with AI agents (3 parallel for speed)
+dvsmith build apb_avip --agent-concurrency 3 --max-tasks 5
 
-# 3. Explore tasks
-ls dvsmith_workspace/gyms/apb_avip/tasks/
-# You'll see task_001_16b_read.md, task_008_8b_write.md, etc.
+# 3. Explore generated tasks
+ls dvsmith_workspace/terminal_bench_tasks/apb_avip/
+# You'll see assertion-*, coverage-*, sequence-* directories
 
-# 4. Use Claude SDK agent to solve a task (requires ANTHROPIC_API_KEY)
-python examples/agents/claude_sdk_agent.py \
-    dvsmith_workspace/gyms/apb_avip/tasks/task_008_8b_write.md \
-    solutions/task_008
+# 4. Validate a task
+cd dvsmith_workspace/terminal_bench_tasks/apb_avip/assertion-monitor
+tb tasks build -t assertion-monitor
 
-# 5. Evaluate the solution
-dvsmith eval \
-    --task dvsmith_workspace/gyms/apb_avip/tasks/task_008_8b_write.md \
-    --patch solutions/task_008/solution.patch \
-    --sim xcelium
+# 5. View AI agent activity
+dvsmith ai-logs -n 20
 ```
+
+For complete documentation on the build command, see [Build Command Documentation](docs/build-command.md).
 
 ## 🔍 AI Transparency & Debugging
 
@@ -106,18 +99,20 @@ All AI interactions are automatically logged to `~/.dvsmith/ai_calls.jsonl`:
 # View recent AI calls (last 10 by default)
 dvsmith ai-logs
 
-# Show more entries
-dvsmith ai-logs --tail 20
+# Show all entries
+dvsmith ai-logs --all
 
-# Show full details (prompts and responses)
-dvsmith ai-logs --tail 5 --full
+# Show detailed view of a specific call
+dvsmith ai-logs -d 5
 ```
 
 ## 📚 Documentation
 
+- **[Build Command](docs/build-command.md)**: Complete guide to the build command and AI agent integration
 - **[Getting Started](docs/tutorials/01_getting_started.md)**: Installation, first gym, basic workflows
 - **[Writing Agents](docs/tutorials/02_writing_agents.md)**: Create agents that solve verification tasks
 - **[Understanding Evaluation](docs/tutorials/03_evaluation.md)**: How solutions are scored
+- **[Claude Code SDK](docs/claude-code-sdk.md)**: Using Claude Agent SDK for AI-powered analysis
 
 ## 📊 Benchmarks
 

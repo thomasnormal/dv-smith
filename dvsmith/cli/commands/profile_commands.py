@@ -1,5 +1,6 @@
 """Profile-related commands."""
 
+import json
 from pathlib import Path
 
 import typer
@@ -7,8 +8,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-from ...config import Profile
-
+from ...core.models import RepoAnalysis
 
 console = Console()
 
@@ -23,7 +23,7 @@ def list_profiles_command(
         console.print("[yellow]No profiles found[/]")
         return
     
-    profiles = list(profiles_dir.glob("*.yaml"))
+    profiles = [p for p in profiles_dir.iterdir() if p.is_dir()]
     
     if not profiles:
         console.print("[yellow]No profiles found[/]")
@@ -34,38 +34,63 @@ def list_profiles_command(
     table.add_column("Tests", style="green")
     table.add_column("Simulators", style="yellow")
     
-    for prof_file in sorted(profiles):
+    for prof_dir in sorted(profiles):
+        analysis_path = prof_dir / "repo_analysis.json"
+        if not analysis_path.exists():
+            table.add_row(prof_dir.name, "[red]Invalid[/]", "missing repo_analysis.json")
+            continue
         try:
-            prof = Profile.from_yaml(prof_file)
+            analysis_data = json.loads(analysis_path.read_text())
+            analysis = RepoAnalysis.from_dict(analysis_data)
+            simulators = ", ".join(sim.value for sim in analysis.detected_simulators) or "unknown"
+            test_count = len(analysis.tests)
             table.add_row(
-                prof.name,
-                str(prof.metadata.test_count),
-                ", ".join(prof.simulators[:3])
+                prof_dir.name,
+                str(test_count),
+                simulators,
             )
-        except Exception as e:
-            table.add_row(prof_file.stem, "[red]Invalid[/]", str(e)[:30])
+        except Exception as exc:
+            table.add_row(prof_dir.name, "[red]Invalid[/]", str(exc)[:30])
     
     console.print(table)
 
 
 def validate_profile_command(
-    profile_path: Path = typer.Argument(..., help="Path to profile YAML"),
+    profile_path: Path = typer.Argument(..., help="Path to profile directory or repo_analysis.json"),
 ):
     """Validate a profile file."""
+    if profile_path.is_dir():
+        analysis_file = profile_path / "repo_analysis.json"
+    else:
+        analysis_file = profile_path
+
     try:
-        profile = Profile.from_yaml(profile_path)
-        
-        console.print(Panel.fit(
-            f"[green]✓ Profile is valid![/]\n\n"
-            f"Name: {profile.name}\n"
-            f"Tests: {profile.metadata.test_count}\n"
-            f"Simulators: {', '.join(profile.simulators)}",
-            title="Profile Validation",
-            border_style="green"
-        ))
-    except Exception as e:
-        console.print(f"[red]✗ Profile validation failed:[/] {e}")
+        analysis_data = json.loads(analysis_file.read_text())
+        analysis = RepoAnalysis.from_dict(analysis_data)
+    except FileNotFoundError:
+        console.print(f"[red]repo_analysis.json not found at[/] {analysis_file}")
         raise typer.Exit(1)
+    except json.JSONDecodeError as exc:
+        console.print(f"[red]Invalid repo_analysis.json:[/] {exc}")
+        raise typer.Exit(1)
+
+    analysis_summary = (
+        f"Tests: {len(analysis.tests)}\n"
+        f"Covergroups: {len(analysis.get_covergroups())}\n"
+        f"Assertions: {len(analysis.assertion_files)}"
+    )
+
+    console.print(
+        Panel.fit(
+            f"[green]✓ Profile is valid![/]\n\n"
+            f"Repo: {analysis.repo_root or 'unknown'}\n"
+            f"Commit: {analysis.git_commit or 'unknown'}\n"
+            f"Simulators: {', '.join(sim.value for sim in analysis.detected_simulators) or 'unknown'}\n"
+            f"{analysis_summary}",
+            title="Profile Validation",
+            border_style="green",
+        )
+    )
 
 
 def info_command(
@@ -78,18 +103,20 @@ def info_command(
     gyms_dir = workspace / "gyms"
     clones_dir = workspace / "clones"
     
-    profile_count = len(list(profiles_dir.glob("*.yaml"))) if profiles_dir.exists() else 0
+    profile_dirs = [p for p in profiles_dir.iterdir() if p.is_dir()] if profiles_dir.exists() else []
+    profile_count = len(profile_dirs)
     gym_count = len(list(gyms_dir.iterdir())) if gyms_dir.exists() else 0
     clone_count = len(list(clones_dir.iterdir())) if clones_dir.exists() else 0
     
     # Calculate total tests
     total_tests = 0
-    if profiles_dir.exists():
-        for prof_file in profiles_dir.glob("*.yaml"):
+    for prof_dir in profile_dirs:
+        analysis_path = prof_dir / "repo_analysis.json"
+        if analysis_path.exists():
             try:
-                prof = Profile.from_yaml(prof_file)
-                total_tests += prof.metadata.test_count
-            except:
+                analysis = RepoAnalysis.from_dict(json.loads(analysis_path.read_text()))
+                total_tests += len(analysis.tests)
+            except Exception:
                 pass
     
     # Display info panel
@@ -112,15 +139,18 @@ def info_command(
         table.add_column("Tests", style="green", justify="right")
         table.add_column("Covergroups", style="yellow", justify="right")
         
-        for prof_file in sorted(profiles_dir.glob("*.yaml"))[:10]:
+        for prof_dir in profile_dirs[:10]:
+            analysis_path = prof_dir / "repo_analysis.json"
+            if not analysis_path.exists():
+                continue
             try:
-                prof = Profile.from_yaml(prof_file)
-                table.add_row(
-                    prof.name,
-                    str(prof.metadata.test_count),
-                    str(prof.metadata.covergroup_count)
-                )
-            except:
-                pass
+                analysis = RepoAnalysis.from_dict(json.loads(analysis_path.read_text()))
+            except Exception:
+                continue
+            table.add_row(
+                prof_dir.name,
+                str(len(analysis.tests)),
+                str(len(analysis.get_covergroups())),
+            )
         
         console.print(table)

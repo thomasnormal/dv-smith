@@ -1,5 +1,6 @@
 """AI-powered repository analyzer using Anthropic Claude."""
 
+import subprocess
 from pathlib import Path
 from typing import Optional, Callable
 
@@ -30,7 +31,7 @@ class AIRepoAnalyzer:
         Returns:
             Complete RepoAnalysis with all discovered elements
         """
-        prompt = f"""Analyze this UVM verification repository and return a complete RepoAnalysis.
+        prompt = f"""Analyze this UVM verification repository and return a complete RepoAnalysis with terminal-bench metadata.
 
 Repository path: {self.repo_root}
 
@@ -41,6 +42,9 @@ Your task:
 4. Find ALL UVM coverage components (classes extending uvm_subscriber<#(...)> OR uvm_component that define one or more covergroups). Also list any covergroups found (search for 'covergroup').
 5. Detect build system (look for Makefile, CMakeLists.txt, FuseSoC *.core, Dvsim *.hjson, etc.)
 6. Identify simulators (questa/mentor, xcelium/xrun, vcs, verilator, dsim) referenced in build files or scripts
+7. Collect SystemVerilog files that primarily contain assertions (interfaces/modules with frequently used SVA constructs like assert property, property/endproperty). Only include files that already exist.
+8. Collect files implementing functional coverage (covergroups/coverpoints/crosses) that students might edit.
+9. Produce minimal sparse checkout include/exclude glob patterns that expose required sources but hide obvious build artifacts/logs.
 
 Notes:
 - Search typical locations (test/, tests/, sequences/, seq/, env/, agents/, verification/, tb/) and nested dirs
@@ -55,6 +59,11 @@ Return RepoAnalysis with:
 - build_system: BuildSystem enum (MAKEFILE, CMAKE, FUSESOC, DVSIM, CUSTOM)
 - detected_simulators: List[Simulator] (QUESTA, XCELIUM, VCS, VERILATOR, DSIM)
 - tests_dir, sequences_dir, env_dir, agents_dir: Optional paths (relative)
+- assertion_files: list[str] - relative paths for key assertion sources
+- coverage_files: list[str] - relative paths for coverage/covergroup sources
+- test_files: list[str] - relative paths for UVM test classes (should align with tests list)
+- sparse_include: list[str] - glob patterns for sparse checkout includes
+- sparse_exclude: list[str] - glob patterns for sparse checkout excludes
 
 Be thorough—use the tools to explore!
 """
@@ -67,6 +76,19 @@ Be thorough—use the tools to explore!
             status_cb=status_cb,
         )
         analysis = self._anchor_paths(analysis)
+
+        analysis.git_commit = analysis.git_commit or self._git("rev-parse", "HEAD")
+        analysis.git_remote = analysis.git_remote or self._git("config", "--get", "remote.origin.url")
+        analysis.git_branch = analysis.git_branch or self._git("symbolic-ref", "--short", "HEAD")
+
+        if not analysis.test_files:
+            analysis.test_files = [t.file_path for t in analysis.tests]
+        if not analysis.assertion_files:
+            analysis.assertion_files = self._guess_assertion_files()
+        if not analysis.coverage_files:
+            analysis.coverage_files = [Path(comp.file_path) for comp in analysis.coverage_components]
+
+        self._finalize_sparse_patterns(analysis)
 
         return analysis
 
@@ -106,7 +128,83 @@ Be thorough—use the tools to explore!
             if not component.file_path.is_absolute():
                 component.file_path = self.repo_root / component.file_path
 
+        analysis.assertion_files = self._dedupe_paths(
+            [self._anchor_path(p) for p in analysis.assertion_files]
+        )
+        analysis.coverage_files = self._dedupe_paths(
+            [self._anchor_path(p) for p in analysis.coverage_files]
+        )
+        analysis.test_files = self._dedupe_paths(
+            [self._anchor_path(p) for p in analysis.test_files]
+        )
+
         if not analysis.covergroups:
             analysis.covergroups = analysis._derived_covergroups()
         
         return analysis
+
+    def _anchor_path(self, path: Path | str) -> Path:
+        candidate = Path(path)
+        if candidate.is_absolute():
+            return candidate
+        return self.repo_root / candidate
+
+    def _git(self, *args: str) -> Optional[str]:
+        try:
+            result = subprocess.run(
+                ["git", *args],
+                cwd=self.repo_root,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        except FileNotFoundError:
+            return None
+        if result.returncode != 0:
+            return None
+        return result.stdout.strip() or None
+
+    def _guess_assertion_files(self) -> list[Path]:
+        assertion_paths: list[Path] = []
+        for component in self.repo_root.rglob("*.sv"):
+            name_lower = component.name.lower()
+            if "assert" in name_lower or "sva" in name_lower:
+                assertion_paths.append(component)
+        return assertion_paths[:10]
+
+    def _finalize_sparse_patterns(self, analysis: RepoAnalysis) -> None:
+        if analysis.sparse_include and analysis.sparse_exclude:
+            return
+
+        include: set[str] = set(analysis.sparse_include)
+        exclude: set[str] = set(analysis.sparse_exclude)
+
+        def add_parent_globs(paths: list[Path]) -> None:
+            for path in paths:
+                try:
+                    rel = path.relative_to(self.repo_root)
+                except ValueError:
+                    rel = path
+                parts = rel.parts
+                if parts:
+                    include.add(str(Path(parts[0]) / "**"))
+
+        add_parent_globs(analysis.test_files)
+        add_parent_globs(analysis.assertion_files)
+        add_parent_globs(analysis.coverage_files)
+
+        if not include:
+            include.add("**")
+
+        if not exclude:
+            exclude.update({"build/**", "out/**", "logs/**", "**/.git/**", "**/.cache/**"})
+
+        analysis.sparse_include = sorted(include)
+        analysis.sparse_exclude = sorted(exclude)
+
+    def _dedupe_paths(self, paths: list[Path]) -> list[Path]:
+        seen: list[Path] = []
+        for path in paths:
+            if path not in seen:
+                seen.append(path)
+        return seen

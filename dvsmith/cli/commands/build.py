@@ -1,209 +1,116 @@
-"""Build command - create gym from profile."""
+"""Build command - orchestrate terminal-bench task generation."""
+
+from __future__ import annotations
 
 import asyncio
-import shutil
+import json
 from pathlib import Path
 from typing import Optional
 
 import typer
-from pydantic import BaseModel, Field
 from rich.console import Console
-from rich.table import Table
 
-from ...config import Profile
-from ...core.ai_analyzer import AIRepoAnalyzer
-from ...core.ai_structured import query_with_pydantic_response
-from ...core.models import RepoAnalysis
-from ...core.task_generator import TaskGenerator
-from ..live_feed import with_live_agent_feed
-
+from ...flows.terminal_bench_flow import build_terminal_bench_tasks
 
 console = Console()
 
 
 def build_command(
-    name: str = typer.Argument(..., help="Gym name"),
+    name: str = typer.Argument(..., help="Profile name created via ingest"),
     workspace: Path = typer.Option(Path("./dvsmith_workspace"), help="Workspace directory"),
-    max_tasks: Optional[int] = typer.Option(None, "--max-tasks", "-n", help="Maximum number of tasks to generate"),
-    skip_verification: bool = typer.Option(False, "--skip-verify", help="Skip verification step"),
+    output: Optional[Path] = typer.Option(
+        None, "--output", "-o", help="Directory for generated terminal-bench tasks"
+    ),
+    max_tasks: Optional[int] = typer.Option(
+        None, "--max-tasks", "-n", help="Maximum number of task scaffolds to create"
+    ),
+    task_type: Optional[list[str]] = typer.Option(
+        None,
+        "--task-type",
+        "-t",
+        help="Task types to generate (default: assertion, coverage, sequence)",
+    ),
+    skip_validation: bool = typer.Option(
+        False, "--skip-validation", help="Skip running tb check after scaffolding"
+    ),
+    agent_concurrency: int = typer.Option(
+        1,
+        "--agent-concurrency",
+        "-c",
+        help="Number of Claude agents to run in parallel (default: 1)",
+    ),
 ):
-    """Build a gym from an analyzed profile."""
-    
-    async def run_build():
-        console.print(f"[cyan]Building gym:[/] {name}")
-        
-        # Load profile
-        profile_path = workspace / "profiles" / f"{name}.yaml"
-        if not profile_path.exists():
-            console.print(f"[red]✗ Profile not found:[/] {profile_path}")
+    """Generate terminal-bench task directories using Prefect orchestration."""
+
+    async def run_build() -> None:
+        profile_dir = workspace / "profiles" / name
+        if not profile_dir.exists():
+            console.print(f"[red]Profile not found:[/] {profile_dir}")
             raise typer.Exit(1)
-        
-        profile = Profile.from_yaml(profile_path)
-        
-        repo_path = Path(profile.repo_url)
-        if not repo_path.exists():
-            console.print(f"[red]✗ Repository not found:[/] {repo_path}")
+
+        analysis_path = profile_dir / "repo_analysis.json"
+        if not analysis_path.exists():
+            console.print(f"[red]Repo analysis not found:[/] {analysis_path}")
+            console.print("[cyan]Run `dvsmith ingest` first.[/]")
             raise typer.Exit(1)
-        
-        console.print(f"[cyan]Repository:[/] {repo_path}")
-        
-        analyzer = AIRepoAnalyzer(repo_root=repo_path)
-        analysis: Optional[RepoAnalysis] = None
-        if profile.metadata.analysis:
-            try:
-                analysis = RepoAnalysis.from_dict(profile.metadata.analysis, repo_root=repo_path)
-                analysis = analyzer._anchor_paths(analysis)
-                console.print("[cyan]Using cached analysis embedded in profile[/]")
-            except Exception as exc:
-                console.print(f"[yellow]⚠ Failed to load cached analysis ({exc}). Re-running.[/]")
-                analysis = None
 
-        if analysis is None:
-            with console.status("[cyan]Analyzing repository..."):
-                analysis = await analyzer.analyze(show_progress=False)
-        
-        # Setup gym structure
-        gym_dir = workspace / "gyms" / name
-        gym_dir.mkdir(parents=True, exist_ok=True)
-        tasks_dir = gym_dir / "tasks"
-        tasks_dir.mkdir(exist_ok=True)
-        
-        console.print(f"[cyan]Gym directory:[/] {gym_dir}")
-        
-        # Copy repository structure to gym
-        with console.status("[cyan]Copying repository structure..."):
-            import shutil
-            
-            # Copy source directories
-            for src_dir in ['src', 'rtl', 'tb', 'sim']:
-                src_path = repo_path / src_dir
-                if src_path.exists():
-                    dest_path = gym_dir / src_dir
-                    if dest_path.exists():
-                        shutil.rmtree(dest_path)
-                    shutil.copytree(src_path, dest_path, symlinks=False, ignore=shutil.ignore_patterns('*.log', '*.vcd', 'work', '*.ucdb'))
-            
-            # Copy build files
-            for build_file in ['Makefile', 'makefile', 'CMakeLists.txt']:
-                build_path = repo_path / build_file
-                if build_path.exists():
-                    shutil.copy2(build_path, gym_dir / build_file)
-        
-        console.print(f"[green]✓ Copied repository structure[/]")
-        
-        # Prepare for task generation and cleaning
-        smoke_tests = profile.grading.smoke_tests
-        
-        # Clean test directory using Claude
-        class CleanupPlan(BaseModel):
-            """Plan for cleaning test directory."""
-            keep: list[str] = Field(default_factory=list)
-            remove: list[str] = Field(default_factory=list)
-            
-        # Get list of tests that will become tasks
-        task_test_names = [t.name for t in analysis.tests if t.name not in smoke_tests and "base" not in t.name.lower()]
-        if max_tasks:
-            task_test_names = task_test_names[:max_tasks]
-        
-        console.print(f"[cyan]Analyzing which files to clean ({len(task_test_names)} task tests)...[/]")
-        
-        # Use Claude to decide what to keep/remove
-        cleanup_prompt = f"""You are helping prepare a UVM verification gym by cleaning the test directory.
+        output_dir = output or (workspace / "terminal_bench_tasks" / name)
+        output_dir.mkdir(parents=True, exist_ok=True)
 
-Tests that will become TASKS (should be REMOVED from gym):
-{chr(10).join(f"  - {name}" for name in task_test_names)}
+        console.print(f"[cyan]Profile directory:[/] {profile_dir}")
+        console.print(f"[cyan]Using analysis file:[/] {analysis_path}")
+        console.print(f"[cyan]Output directory:[/] {output_dir}")
 
-Smoke tests (must be KEPT):
-{chr(10).join(f"  - {name}" for name in smoke_tests)}
+        task_types = tuple(task_type) if task_type else ("assertion", "coverage", "sequence")
 
-Your job:
-1. Identify which test files should be REMOVED (the task tests above)
-2. Identify which files should be KEPT (base tests, packages, infrastructure)
+        try:
+            analysis_data = json.loads(analysis_path.read_text())
+        except json.JSONDecodeError as exc:
+            console.print(f"[red]Failed to parse repo_analysis.json:[/] {exc}")
+            raise typer.Exit(1)
 
-Return CleanupPlan with:
-- keep: List of filenames to preserve
-- remove: List of filenames to delete
-
-Explore files and decide what to keep vs remove.
-"""
-        
-        # Call Claude for cleanup plan
-        with console.status("[cyan]Planning cleanup with Claude..."):
-            cleanup_plan = await query_with_pydantic_response(
-                prompt=cleanup_prompt,
-                response_model=CleanupPlan,
-                system_prompt="You are an expert at UVM testbench structure.",
-                cwd=str(gym_dir)
-            )
-
-
-        # Execute cleanup
-        if analysis.tests_dir:
-            if analysis.tests_dir.is_absolute():
-                test_dir_rel = analysis.tests_dir.relative_to(repo_path)
-            else:
-                test_dir_rel = analysis.tests_dir
-            test_dir_in_gym = gym_dir / test_dir_rel
-        else:
-            test_dir_in_gym = None
-            
-        if test_dir_in_gym and test_dir_in_gym.exists():
-            removed_count = 0
-            for filename in cleanup_plan.remove:
-                test_file = test_dir_in_gym / filename
-                if test_file.exists():
-                    test_file.unlink()
-                    removed_count += 1
-            console.print(f"[green]✓ Removed {removed_count} task test files, kept {len(cleanup_plan.keep)} infrastructure files[/]")
-        
-        # Generate tasks
-        task_gen = TaskGenerator(analysis, profile.to_dict())
-        
-        if max_tasks:
-            original_tests = analysis.tests
-            analysis.tests = [t for t in original_tests if t.name not in smoke_tests][:max_tasks]
-        
-        task_count_msg = f"{max_tasks} tasks" if max_tasks else f"{len([t for t in analysis.tests if t.name not in smoke_tests])} tasks"
-        console.print(f"[cyan]Generating {task_count_msg}...[/]")
-        
-        tasks = await with_live_agent_feed(
-            task_gen.generate_tasks_async,
-            console,
-            title=f"Generating Tasks",
-            max_messages=3,
-            output_dir=tasks_dir,
-            smoke_tests=smoke_tests
+        result = await build_terminal_bench_tasks(
+            analysis_data=analysis_data,
+            output_dir=str(output_dir),
+            task_types=task_types,
+            max_tasks=max_tasks,
+            agent_concurrency=agent_concurrency,
+            run_validation=not skip_validation,
         )
+
+        summary_path = output_dir / "build_summary.json"
+        if summary_path.exists():
+            console.print(f"[green]✓ Summary written to[/] {summary_path}")
+        else:
+            console.print("[yellow]⚠ No summary file generated[/]")
+
+        if result.get("validation_results"):
+            passed = [r for r in result["validation_results"] if r.get("passed")]
+            console.print(f"[green]✓ Validation passed for {len(passed)} tasks[/]")
         
-        if max_tasks:
-            analysis.tests = original_tests
+        # Show helpful information about generated tasks
+        console.print("\n[cyan]═══ Generated Tasks ═══[/]")
+        console.print(f"[cyan]Location:[/] {output_dir}")
         
-        console.print(f"[green]✓ Generated {len(tasks)} tasks[/]")
-        
-        # Create backups
-        backups_dir = gym_dir / "backups" / "original_tests"
-        backups_dir.mkdir(parents=True, exist_ok=True)
-        
-        with console.status(f"[cyan]Backing up {len(analysis.tests)} test files..."):
-            for test in analysis.tests:
-                if test.file_path.exists():
-                    dest = backups_dir / test.file_path.name
-                    import shutil
-                    shutil.copy2(test.file_path, dest)
-        
-        console.print(f"[green]✓ Backed up test files to:[/] {backups_dir}")
-        console.print(f"[green]✓ Build complete![/]")
-        
-        # Show summary table
-        table = Table(title="Gym Summary")
-        table.add_column("Component", style="cyan")
-        table.add_column("Count", style="green", justify="right")
-        
-        table.add_row("Tasks Generated", str(len(tasks)))
-        table.add_row("Tests Backed Up", str(len(analysis.tests)))
-        table.add_row("Sequences", str(len(analysis.sequences)))
-        table.add_row("Gym Location", str(gym_dir))
-        
-        console.print(table)
-    
+        # List task directories
+        task_dirs = sorted([d for d in output_dir.iterdir() if d.is_dir()])
+        if task_dirs:
+            console.print(f"\n[cyan]Tasks created:[/]")
+            for task_dir in task_dirs:
+                console.print(f"  • {task_dir.name}")
+            
+            console.print(f"\n[cyan]Next steps:[/]")
+            console.print(f"  # List all tasks")
+            console.print(f"  ls {output_dir}")
+            console.print(f"\n  # Inspect a specific task")
+            console.print(f"  cd {output_dir}/{task_dirs[0].name}")
+            console.print(f"  cat prompt.md")
+            console.print(f"\n  # Build Docker image for a task")
+            console.print(f"  tb tasks build --task-id {task_dirs[0].name} --tasks-dir {output_dir}")
+            console.print(f"\n  # View AI agent activity logs")
+            console.print(f"  dvsmith ai-logs -n {len(task_dirs)}")
+            console.print()
+        else:
+            console.print("[yellow]No task directories found[/]")
+
     asyncio.run(run_build())

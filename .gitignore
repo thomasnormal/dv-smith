@@ -62,3 +62,8 @@ simv/
 *.so
 *.a
 *.bin
+
+
+# Terminal bench
+gym/
+terminal-bench/
