@@ -161,38 +161,19 @@ To solve a task manually:
    git diff > solution.patch
    ```
 
-### 6. Evaluate a Solution
+### 6. Validate a Solution
 
-Once you have a solution (as a patch file), evaluate it:
+Solution validation now runs through the Terminal Bench harness. Once you have
+your patch, use the `tb` CLI to execute the official checks:
 
 ```bash
-dvsmith eval \
-    --task dvsmith_workspace/gyms/apb_avip/tasks/task_001_8b_write.md \
-    --patch solution.patch \
-    --sim xcelium
+tb run \
+    --dataset-path dvsmith_workspace/terminal_bench_tasks/axi4_avip \
+    --task-id assertion-master_assertions
 ```
 
-**What happens during evaluation:**
-- Applies the patch to a clean gym copy
-- Compiles the design with specified simulator
-- Runs the simulation with coverage enabled
-- Extracts coverage metrics (functional + code)
-- Parses simulation logs for errors/warnings
-- Calculates weighted score
-- Generates detailed evaluation report
-
-**Example output:**
-```
-[Evaluator] Task: task_001_8b_write
-[Evaluator] Applying patch...
-[Evaluator] Compiling design...
-[Xcelium] Compilation successful
-[Evaluator] Running simulation...
-[Evaluator] Extracting coverage...
-[Evaluator] Coverage: Functional=85.5%, Code=78.2%, Health=100%
-[Evaluator] Score: 84.7/100
-[Evaluator] Status: PASSED
-```
+Refer to the Terminal Bench documentation for simulator configuration,
+artifact uploads, and additional run options.
 
 ## Common Workflows
 
@@ -218,11 +199,10 @@ python examples/agents/claude_sdk_agent.py \
     dvsmith_workspace/gyms/apb_avip/tasks/task_008_8b_write.md \
     solutions/task_008
 
-# Evaluate the agent's solution
-dvsmith eval \
-    --task dvsmith_workspace/gyms/apb_avip/tasks/task_008_8b_write.md \
-    --patch solutions/task_008/solution.patch \
-    --sim xcelium
+# Validate the agent's solution with the Terminal Bench harness
+tb run \
+    --dataset-path dvsmith_workspace/terminal_bench_tasks/apb_avip \
+    --task-id task_008_8b_write
 ```
 
 ### Workflow 3: Batch Evaluation
@@ -232,7 +212,7 @@ dvsmith eval \
 for task in dvsmith_workspace/gyms/apb_avip/tasks/*.md; do
     task_id=$(basename "$task" .md)
     python your_agent.py "$task" "solutions/$task_id"
-    dvsmith eval --task "$task" --patch "solutions/$task_id/solution.patch"
+    tb run --dataset-path dvsmith_workspace/terminal_bench_tasks/apb_avip --task-id "$task_id"
 done
 ```
 

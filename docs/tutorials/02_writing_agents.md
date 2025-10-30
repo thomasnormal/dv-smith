@@ -543,11 +543,10 @@ python my_agent.py \
     dvsmith_workspace/gyms/apb_avip/tasks/task_001_8b_write.md \
     test_output/
 
-# Evaluate the solution
-dvsmith eval \
-    --task dvsmith_workspace/gyms/apb_avip/tasks/task_001_8b_write.md \
-    --patch test_output/solution.patch \
-    --sim xcelium
+# Validate the solution using Terminal Bench
+tb run \
+    --dataset-path dvsmith_workspace/terminal_bench_tasks/apb_avip \
+    --task-id task_001_8b_write
 ```
 
 ## Example: Complete Agent

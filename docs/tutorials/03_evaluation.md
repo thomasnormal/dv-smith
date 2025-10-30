@@ -1,5 +1,11 @@
 # Understanding Evaluation in DV-Smith
 
+> **Note**
+> The standalone `dvsmith eval` command has been retired. Evaluation now runs
+> through Terminal Bench workflows (`tb run` and related helpers). The scoring
+> model and artifacts described below still apply; only the invocation method
+> has changed.
+
 This tutorial explains how DV-Smith evaluates agent solutions and calculates scores.
 
 ## Evaluation Overview
@@ -14,7 +20,7 @@ DV-Smith evaluates solutions based on three key metrics:
 ### 1. Apply Solution
 
 ```bash
-dvsmith eval --task <task.md> --patch <solution.patch> --sim xcelium
+tb run --dataset-path <tasks_dir> --task-id <task-id>
 ```
 
 **Steps:**
@@ -329,7 +335,7 @@ Total Score = (100.0 × 0.6) + (100.0 × 0.3) + (100.0 × 0.1)
 ### JSON Output
 
 ```bash
-dvsmith eval --task task.md --patch solution.patch --output results.json
+tb run --dataset-path <tasks_dir> --task-id <task-id> --output-path runs
 ```
 
 ```json
@@ -406,8 +412,7 @@ class CustomEvaluator(Evaluator):
 ```bash
 # Run on multiple simulators and compare
 for sim in xcelium questa vcs; do
-    dvsmith eval --task task.md --patch solution.patch --sim $sim \
-        --output results_${sim}.json
+    tb run --dataset-path <tasks_dir> --task-id <task-id> --output-path "runs/${sim}"
 done
 
 # Compare results
@@ -420,8 +425,7 @@ python compare_results.py results_*.json
 # Evaluate on entire benchmark suite
 for task in gym/tasks/*.md; do
     task_id=$(basename "$task" .md)
-    dvsmith eval --task "$task" --patch "solutions/${task_id}.patch" \
-        --output "results/${task_id}.json"
+    tb run --dataset-path <tasks_dir> --task-id "$task_id" --output-path "runs/${task_id}"
 done
 
 # Generate summary report
