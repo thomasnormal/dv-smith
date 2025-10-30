@@ -52,22 +52,51 @@ echo "ANTHROPIC_API_KEY=your-key-here" > .env
 # 1. Ingest and analyze a UVM repository
 dvsmith ingest https://github.com/mbits-mirafra/apb_avip
 
-# 2. Build Terminal-Bench tasks with AI agents (3 parallel for speed)
-dvsmith build apb_avip --agent-concurrency 3 --max-tasks 5
+# 2. Build a specific Terminal-Bench task
+dvsmith build coverage-apb_master_coverage
 
-# 3. Explore generated tasks
-ls dvsmith_workspace/terminal_bench_tasks/apb_avip/
-# You'll see assertion-*, coverage-*, sequence-* directories
+# 3. Explore generated task
+ls dvsmith_workspace/terminal_bench_tasks/apb_avip/coverage-apb_master_coverage/
+# You'll see: prompt.md, task.yaml, Dockerfile, tests/, solution.sh
 
-# 4. Validate a task
-cd dvsmith_workspace/terminal_bench_tasks/apb_avip/assertion-monitor
-tb tasks build -t assertion-monitor
+# 4. Run Terminal-Bench to test an AI agent on the task
+tb run -t coverage-apb_master_coverage \
+  --dataset-path dvsmith_workspace/terminal_bench_tasks/apb_avip \
+  -a claude-code --livestream
 
-# 5. View AI agent activity
-dvsmith ai-logs -n 20
+# 5. View results
+./parse_agent_log.py runs/<run-id>/coverage-apb_master_coverage/.../sessions/agent.log
 ```
 
 For complete documentation on the build command, see [Build Command Documentation](docs/build-command.md).
+
+### Running `dvsmith build` in Docker (Recommended for Security)
+
+⚠️ **Security Warning**: `dvsmith build` runs AI agents that execute arbitrary bash commands on your system. For untrusted repositories, run it in Docker isolation.
+
+```bash
+# One-time: Build the Docker image
+docker build -f Dockerfile.dvsmith -t dvsmith:latest .
+
+# Run dvsmith build safely in Docker
+docker run -it --rm \
+  --network=none \
+  -v $(pwd)/dvsmith_workspace:/workspace \
+  -e ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY \
+  dvsmith:latest build coverage-apb_master_coverage
+
+# For ingest (needs network access to clone repos)
+docker run -it --rm \
+  -v $(pwd)/dvsmith_workspace:/workspace \
+  -e ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY \
+  dvsmith:latest ingest https://github.com/mbits-mirafra/apb_avip
+```
+
+**Security benefits**:
+- ✅ No network access for `build` command (prevents data exfiltration)
+- ✅ Isolated filesystem (only workspace directory is accessible)
+- ✅ Can't modify your host system
+- ✅ Reproducible builds
 
 ## 🔍 AI Transparency & Debugging
 

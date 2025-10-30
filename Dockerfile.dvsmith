@@ -1,0 +1,21 @@
+FROM python:3.13-slim
+
+# Install uv for faster package management
+RUN pip install uv
+
+WORKDIR /app
+
+# Copy package metadata and lock file
+COPY pyproject.toml uv.lock ./
+
+# Copy source code
+COPY dvsmith ./dvsmith
+
+# Install dvsmith and dependencies
+RUN uv pip install --system -e .
+
+# Set working directory for task generation
+WORKDIR /workspace
+
+# Entry point is the dvsmith CLI
+ENTRYPOINT ["dvsmith"]
