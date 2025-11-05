@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 import asyncio
-import json
-import shutil
-import subprocess
+import logging
+import os
 from pathlib import Path
 from typing import Optional
 
@@ -13,11 +12,15 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from ...core.ai_analyzer import AIRepoAnalyzer
 from ...core.models import RepoAnalysis
-from ..live_feed import with_live_agent_feed
+from ...flows.ingest_flow import ingest_repository
+from ...flows.terminal_bench_flow import preview_available_tasks
 
 console = Console()
+
+# Configure Prefect logging to be less verbose
+os.environ.setdefault("PREFECT_LOGGING_LEVEL", "WARNING")
+logging.getLogger("prefect").setLevel(logging.WARNING)
 
 
 def ingest_command(
@@ -33,28 +36,18 @@ def ingest_command(
         console.print(f"[cyan]Ingesting repository:[/] {repo_url}")
         console.print(f"[cyan]Profile name:[/] {profile_name}")
 
-        repo_path = await ensure_repo_clone(repo_url, workspace / "clones", profile_name)
-
-        analyzer = AIRepoAnalyzer(repo_root=repo_path)
-        analysis: RepoAnalysis = await with_live_agent_feed(
-            analyzer.analyze,
-            console,
-            title="Analyzing Repository",
+        # Run Prefect flow
+        result = await ingest_repository(
+            repo_url=repo_url,
+            profile_name=profile_name,
+            workspace=workspace,
+            console=console,
         )
 
-        if not analysis.git_remote and repo_url.startswith(("http://", "https://", "git@")):
-            analysis.git_remote = repo_url
-        if not analysis.git_commit:
-            raw_commit = subprocess.run(
-                ["git", "rev-parse", "HEAD"],
-                cwd=repo_path,
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-            if raw_commit.returncode == 0:
-                analysis.git_commit = raw_commit.stdout.strip()
+        # Load analysis for reporting
+        analysis = RepoAnalysis.from_dict(result["analysis"])
 
+        # Show warnings if metadata missing
         if not analysis.git_remote:
             console.print(
                 "[yellow]⚠ Could not determine git remote. Docker scaffolds require a remote URL for ADD commands.[/]"
@@ -62,18 +55,14 @@ def ingest_command(
         if not analysis.git_commit:
             console.print("[yellow]⚠ Could not determine git commit hash.[/]")
 
+        # Report results
         report_analysis(analysis)
-
-        profile_dir = workspace / "profiles" / profile_name
-        profile_dir.mkdir(parents=True, exist_ok=True)
-
-        analysis_path = profile_dir / "repo_analysis.json"
-        analysis_dict = analysis.to_dict()
-        analysis_dict["repo_root"] = str(repo_path)
-        analysis_path.write_text(json.dumps(analysis_dict, indent=2))
-
-        console.print(f"[green]✓ Analysis saved:[/] {analysis_path}")
+        console.print(f"[green]✓ Analysis saved:[/] {result['analysis_path']}")
         console.print("[green]✓ Ingest complete![/]")
+
+        # Display available tasks
+        console.print()
+        display_available_tasks(analysis, profile_name)
 
     asyncio.run(run_ingest())
 
@@ -86,28 +75,6 @@ def derive_name(repo_url: str, explicit_name: Optional[str]) -> str:
     else:
         derived = Path(repo_url).stem
     return derived.replace(".git", "").replace("-", "_")
-
-
-async def ensure_repo_clone(repo_url: str, clones_dir: Path, name: str) -> Path:
-    if repo_url.startswith(("http://", "https://", "git@")):
-        clones_dir.mkdir(parents=True, exist_ok=True)
-        repo_path = clones_dir / name
-        if repo_path.exists():
-            shutil.rmtree(repo_path)
-        result = await asyncio.to_thread(
-            subprocess.run,
-            ["git", "clone", repo_url, str(repo_path)],
-            capture_output=True,
-            text=True,
-        )
-        if result.returncode != 0:
-            raise RuntimeError(f"git clone failed: {result.stderr}")
-        return repo_path
-
-    repo_path = Path(repo_url).resolve()
-    if not repo_path.exists():
-        raise FileNotFoundError(f"Repository path not found: {repo_path}")
-    return repo_path
 
 
 def report_analysis(analysis: RepoAnalysis) -> None:
@@ -125,3 +92,30 @@ def report_analysis(analysis: RepoAnalysis) -> None:
     table.add_row("Tests", str(len(analysis.tests)))
 
     console.print(table)
+
+
+def display_available_tasks(analysis: RepoAnalysis, profile_name: str) -> None:
+    """Display table of available tasks that can be built."""
+    available_tasks = preview_available_tasks(analysis)
+
+    if not available_tasks:
+        console.print("[yellow]No tasks available to build.[/]")
+        return
+
+    table = Table(title=f"Available Tasks ({len(available_tasks)} total)", show_header=True)
+    table.add_column("Task ID", style="cyan", no_wrap=True)
+    table.add_column("Type", style="magenta")
+    table.add_column("Target File", style="green")
+
+    for task in available_tasks:
+        table.add_row(task["task_id"], task["task_type"], task["target_file"])
+
+    console.print(table)
+    console.print()
+    console.print("[bold cyan]To build a specific task:[/]")
+    console.print(f"  dvsmith build {available_tasks[0]['task_id']}")
+    console.print()
+    console.print("[dim]Or build multiple tasks with a shell loop:[/]")
+    console.print(f"  for task in {available_tasks[0]['task_id']} {available_tasks[1]['task_id'] if len(available_tasks) > 1 else '...'}; do")
+    console.print(f"    dvsmith build $task")
+    console.print(f"  done")

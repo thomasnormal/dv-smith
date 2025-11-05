@@ -783,7 +783,7 @@ requires-dist = [
     { name = "pyyaml", specifier = ">=6.0" },
     { name = "rich", specifier = ">=13.0.0" },
     { name = "tenacity", specifier = ">=8.0.0" },
-    { name = "terminal-bench", editable = "terminal-bench" },
+    { name = "terminal-bench", specifier = ">=0.2.18" },
     { name = "tqdm", specifier = ">=4.65.0" },
     { name = "typer", specifier = ">=0.9.0" },
 ]
@@ -2270,6 +2270,7 @@ wheels = [
 name = "pyarrow"
 version = "22.0.0"
 source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/30/53/04a7fdc63e6056116c9ddc8b43bc28c12cdd181b85cbeadb79278475f3ae/pyarrow-22.0.0.tar.gz", hash = "sha256:3d600dc583260d845c7d8a6db540339dd883081925da2bd1c5cb808f720b3cd9", size = 1151151, upload-time = "2025-10-24T12:30:00.762Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/af/63/ba23862d69652f85b615ca14ad14f3bcfc5bf1b99ef3f0cd04ff93fdad5a/pyarrow-22.0.0-cp312-cp312-macosx_12_0_arm64.whl", hash = "sha256:bea79263d55c24a32b0d79c00a1c58bb2ee5f0757ed95656b01c0fb310c5af3d", size = 34211578, upload-time = "2025-10-24T10:05:21.583Z" },
     { url = "https://files.pythonhosted.org/packages/b1/d0/f9ad86fe809efd2bcc8be32032fa72e8b0d112b01ae56a053006376c5930/pyarrow-22.0.0-cp312-cp312-macosx_12_0_x86_64.whl", hash = "sha256:12fe549c9b10ac98c91cf791d2945e878875d95508e1a5d14091a7aaa66d9cf8", size = 35989906, upload-time = "2025-10-24T10:05:29.485Z" },
@@ -3172,7 +3173,7 @@ wheels = [
 [[package]]
 name = "terminal-bench"
 version = "0.2.18"
-source = { editable = "terminal-bench" }
+source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anthropic" },
     { name = "asciinema" },
@@ -3186,7 +3187,6 @@ dependencies = [
     { name = "pandas" },
     { name = "psycopg2-binary" },
     { name = "pydantic" },
-    { name = "pyyaml" },
     { name = "ruamel-yaml" },
     { name = "sqlalchemy" },
     { name = "streamlit" },
@@ -3196,39 +3196,9 @@ dependencies = [
     { name = "tqdm" },
     { name = "typer" },
 ]
-
-[package.metadata]
-requires-dist = [
-    { name = "anthropic", specifier = ">=0.45.2" },
-    { name = "asciinema", specifier = ">=2.4.0" },
-    { name = "boto3", specifier = ">=1.37.13" },
-    { name = "docker", specifier = ">=7.1.0" },
-    { name = "inquirer", specifier = ">=3.4.0" },
-    { name = "jinja2", specifier = ">=3.1.0" },
-    { name = "litellm", specifier = ">=1.67.5" },
-    { name = "mcp", specifier = ">=1.7.0" },
-    { name = "openai", specifier = ">=1.59.9" },
-    { name = "pandas", specifier = ">=2.2.0" },
-    { name = "psycopg2-binary", specifier = ">=2.9.9" },
-    { name = "pydantic", specifier = ">=2.10.5" },
-    { name = "pyyaml", specifier = ">=6.0.0" },
-    { name = "ruamel-yaml", specifier = ">=0.18.10" },
-    { name = "sqlalchemy", specifier = ">=2.0.25" },
-    { name = "streamlit", specifier = ">=1.31.1" },
-    { name = "supabase", specifier = ">=2.15.1" },
-    { name = "tabulate", specifier = ">=0.9.0" },
-    { name = "tenacity", specifier = ">=9.0.0" },
-    { name = "tqdm", specifier = ">=4.67.1" },
-    { name = "typer", specifier = ">=0.16.0" },
-]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "ipykernel", specifier = ">=6.29.5" },
-    { name = "ipython-sql", specifier = ">=0.5.0" },
-    { name = "prettytable", specifier = "==3.5.0" },
-    { name = "pytest", specifier = ">=8.3.4" },
-    { name = "pytest-cov", specifier = ">=6.0.0" },
+sdist = { url = "https://files.pythonhosted.org/packages/bd/04/0f32893404091a45a53662eae25099db0c9e57890ede23ba2466c8d9c608/terminal_bench-0.2.18.tar.gz", hash = "sha256:787c494a882d441a7c25b60d848c0273269451b4babb596008adcc0d2331004b", size = 109157, upload-time = "2025-09-26T22:58:48.258Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/c5/5a/0196c0816e45b8254f5fcf42534b18dad870c43e4ae7db9bbf7b73ee8dc7/terminal_bench-0.2.18-py3-none-any.whl", hash = "sha256:564e8f50968c91a9018edf62ed0c2cfb3a1cf068cf4f843bcaeed06d8340f2e8", size = 167423, upload-time = "2025-09-26T22:58:47.116Z" },
 ]
 
 [[package]]

@@ -1,0 +1,13 @@
+{"version": 2, "width": 160, "height": 40, "timestamp": 1762279695, "env": {"SHELL": "/bin/bash", "TERM": "tmux-256color"}}
+[0.502391, "o", "\u001b[?2004h"]
+[0.51075, "o", "root@thomas-ahle:/app# "]
+[2.235606, "i", "clear\r"]
+[2.235802, "o", "clear\r\n\u001b[?2004l\r"]
+[2.249885, "o", "\u001b[H\u001b[J\u001b[3J"]
+[2.25019, "o", "\u001b[?2004hroot@thomas-ahle:/app# "]
+[2.391539, "i", "bash /tests/run-tests.sh; tmux wait -S done\r"]
+[2.392825, "o", "bash /tests/run-tests.sh; tmux wait -S done"]
+[2.393048, "o", "\r\n"]
+[2.396064, "o", "\u001b[?2004l\r"]
+[2.40074, "o", "Running simulation..."]
+[2.401912, "o", "\r\n"]

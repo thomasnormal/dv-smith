@@ -411,7 +411,7 @@ async def query_with_pydantic_response(
     agent_messages: list[dict[str, Any]] = []
 
     if not hasattr(log_ai_call, "_printed_location"):
-        logger.info("Logging AI calls to: %s", AI_LOG_FILE)
+        logger.debug("Logging AI calls to: %s", AI_LOG_FILE)
         log_ai_call._printed_location = True  # type: ignore[attr-defined]
 
     @tool(

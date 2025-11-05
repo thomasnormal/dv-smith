@@ -1,0 +1,8 @@
+['asciinema rec --stdin /logs/agent.cast', 'Enter']
+['clear', 'Enter']
+['source /installed-agent/setup-env.sh', 'Enter']
+["source /installed-agent/install-agent.sh || echo 'INSTALL_FAIL_STATUS'", 'Enter']
+['claude --verbose --output-format stream-json -p \'Make the `apb_8b_write_test` test pass. This test verifies 8-bit write transactions on the APB bus.\n\nThe test currently fails to compile. Examine the test code, understand what\'"\'"\'s missing, and implement whatever is needed.\n\nYour implementation will be validated by:\n- Successful compilation with Xcelium\n- Simulation completes without UVM errors\n- Coverage shows BIT_8 and WRITE transactions were exercised\n\nSee `prompt.md` for the task description and `TESTBENCH_GUIDE.md` for testbench documentation.\' --allowedTools Bash Edit Write Read Glob Grep LS WebFetch NotebookEdit NotebookRead TodoRead TodoWrite Agent', 'Enter']
+['asciinema rec --stdin /logs/tests.cast', 'Enter']
+['clear', 'Enter']
+['bash ', '/tests/run-tests.sh', 'Enter']

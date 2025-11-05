@@ -20,7 +20,10 @@ WORKDIR /app
 
 RUN apt-get update && apt-get install -y git patch && rm -rf /var/lib/apt/lists/*
 
-ADD {repo_remote}#{repo_commit} /app/repo
+# Clone the pinned repository commit directly into /app/repo
+RUN git clone {repo_remote} /app/repo && \\
+    cd /app/repo && \\
+    git checkout {repo_commit}
 
 COPY resources/ /tmp/resources/
 RUN bash /tmp/resources/setup_repo.sh /app/repo && rm -rf /tmp/resources

@@ -42,11 +42,8 @@ dependencies = [
     "tenacity>=8.0.0",
     "filelock>=3.0.0",
     "jsonschema>=4.0.0",
-    "terminal-bench",
+    "terminal-bench>=0.2.18",
 ]
-
-[tool.uv.sources]
-terminal-bench = { path = "terminal-bench", editable = true }
 
 [project.optional-dependencies]
 dev = [

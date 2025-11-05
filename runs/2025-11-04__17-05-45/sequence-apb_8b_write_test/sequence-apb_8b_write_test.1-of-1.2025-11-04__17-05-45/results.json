@@ -1,0 +1,18 @@
+{
+    "id": "551eedff-da5d-47e8-97f6-b29f02229d87",
+    "trial_name": "sequence-apb_8b_write_test.1-of-1.2025-11-04__17-05-45",
+    "task_id": "sequence-apb_8b_write_test",
+    "instruction": "Make the `apb_8b_write_test` test pass. This test verifies 8-bit write transactions on the APB bus.\n\nThe test currently fails to compile. Examine the test code, understand what's missing, and implement whatever is needed.\n\nYour implementation will be validated by:\n- Successful compilation with Xcelium\n- Simulation completes without UVM errors\n- Coverage shows BIT_8 and WRITE transactions were exercised\n\nSee `prompt.md` for the task description and `TESTBENCH_GUIDE.md` for testbench documentation.",
+    "is_resolved": null,
+    "failure_mode": "test_timeout",
+    "parser_results": null,
+    "recording_path": "2025-11-04__17-05-45/sequence-apb_8b_write_test/sequence-apb_8b_write_test.1-of-1.2025-11-04__17-05-45/sessions/agent.cast",
+    "total_input_tokens": 0,
+    "total_output_tokens": 0,
+    "trial_started_at": "2025-11-04T17:05:45.081442+00:00",
+    "trial_ended_at": "2025-11-04T17:16:29.147992+00:00",
+    "agent_started_at": "2025-11-04T17:06:02.134819+00:00",
+    "agent_ended_at": "2025-11-04T17:13:25.435071+00:00",
+    "test_started_at": "2025-11-04T17:13:28.938227+00:00",
+    "test_ended_at": "2025-11-04T17:16:29.094875+00:00"
+}

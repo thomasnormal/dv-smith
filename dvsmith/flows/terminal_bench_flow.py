@@ -60,6 +60,8 @@ What to Produce:
    - Must return exit code 0 on success, non-zero on failure
    - Should be idempotent and compatible with `tb check .`
    - Can test for file existence, output correctness, compilation, etc.
+   - If you depend on pytest, install it inside the container before running (for example with `uv pip install pytest`); otherwise, implement the checker using only the Python standard library.
+   - IMPORTANT: When using pytest, ALWAYS use the `-ra` flag (e.g., `pytest "$TEST_DIR/test_outputs.py" -ra`) to ensure the test summary is parseable by terminal-bench, even when all tests pass.
 
 3. **Reference solution** (solution.patch or solution/):
    - Minimal working solution that passes the test
@@ -70,18 +72,22 @@ How to Work:
 1. Start by reading the current directory contents to understand the scaffold structure
 2. Use Read/Grep/Glob tools to explore existing files and understand context
 3. Create or modify files using Write/Edit tools (work ONLY in cwd: {scaffold.path})
-4. After making changes, run `tb tasks build .` using the Bash tool to validate
-5. Iterate on failures - read error messages and fix issues
-6. Continue until `tb tasks build .` passes successfully
+4. After making changes, validate using the Bash tool:
+   - Run: `cd .. && tb tasks check {scaffold.task_id} --tasks-dir .`
+   - This checks task quality including instruction clarity, test alignment, anti-cheating measures
+5. Read the quality check output carefully - it shows pass/fail for each criterion with explanations
+6. Fix any failures by updating task files (prompt.md, task.yaml, tests/, etc.)
+7. Re-run the check and iterate until all quality checks pass
+8. Optionally also run: `cd .. && tb tasks build {scaffold.task_id} --tasks-dir .` to test Docker build
 
 Tool Usage Guidelines:
 - Use Read, Write, Edit, Glob, Grep for file operations
-- Use Bash ONLY for: `tb tasks build .` and basic shell commands (no network, no installs)
+- Use Bash for: `tb tasks check` and `tb tasks build` validation commands
 - All file paths are relative to cwd
 - Do NOT modify files outside the task directory
 
 Success Criteria:
-- `tb tasks build .` passes (exit code 0)
+- `tb tasks check` shows all quality checks passing (or only acceptable failures)
 - All required files are present
 - Instructions are clear and complete
 - Test script properly validates the task
@@ -93,13 +99,62 @@ When done, call the FinalAnswer tool EXACTLY ONCE with a JSON payload matching t
     "task_id": "{scaffold.task_id}",
     "status": "ok",  // or "failed" if you couldn't complete it
     "modified_files": ["file1.md", "run-tests.sh", ...],
-    "iterations": <number of times you ran tb check>,
-    "tb_check_passed": true,  // or false
-    "tb_stdout": "<last tb check output (truncated to 500 chars)>",
-    "tb_stderr": "<last tb check errors if any>",
-    "notes": "<optional summary of what you created and any decisions made>"
+    "iterations": <number of times you ran tb tasks check>,
+    "tb_check_passed": true,  // whether tb tasks check passed (all checks green/pass)
+    "tb_stdout": "<last tb tasks check output (truncated to 500 chars)>",
+    "tb_stderr": "<errors if any>",
+    "notes": "<summary of what you created, quality check results, and any known limitations>"
 }}
 """
+
+
+def preview_available_tasks(analysis: RepoAnalysis) -> list[dict[str, str]]:
+    """Preview all available tasks without creating scaffolds.
+
+    Args:
+        analysis: Repository analysis data
+
+    Returns:
+        List of task metadata dicts with keys: task_id, task_type, target_file
+    """
+    def rel_str(path: Path) -> str:
+        if analysis.repo_root:
+            try:
+                return str(path.relative_to(analysis.repo_root))
+            except ValueError:
+                return str(path)
+        return str(path)
+
+    type_to_candidates: dict[str, list[str]] = {
+        "assertion": [rel_str(p) for p in analysis.assertion_files],
+        "coverage": [rel_str(p) for p in analysis.coverage_files],
+        "sequence": [rel_str(p) for p in analysis.test_files],
+    }
+
+    available_tasks: list[dict[str, str]] = []
+    existing_ids: set[str] = set()
+
+    for task_type in ["assertion", "coverage", "sequence"]:
+        candidates = type_to_candidates.get(task_type, [])
+        for candidate in candidates:
+            slug_base = slugify(Path(candidate).stem)
+            slug = f"{task_type}-{slug_base}"
+
+            # Handle duplicate task IDs
+            counter = 1
+            task_id = slug
+            while task_id in existing_ids:
+                counter += 1
+                task_id = f"{slug}-{counter}"
+
+            existing_ids.add(task_id)
+            available_tasks.append({
+                "task_id": task_id,
+                "task_type": task_type,
+                "target_file": candidate,
+            })
+
+    return available_tasks
 
 
 def prepare_task_plans(
@@ -161,26 +216,29 @@ def prepare_task_plans(
     return plans
 
 
-async def _run_agent_with_claude(scaffold: TaskScaffold, logger) -> dict[str, Any]:
-    """Run Claude agent to generate a complete terminal-bench task."""
+async def _run_agent_with_claude(scaffold: TaskScaffold, logger, status_cb=None) -> dict[str, Any]:
+    """Run Claude agent to generate a complete terminal-bench task.
+
+    Args:
+        scaffold: Task scaffold to build
+        logger: Logger instance
+        status_cb: Optional status callback for live feed
+    """
     from ..core.ai_structured import query_with_pydantic_response
-    
-    logger.info(f"Starting agent for task: {scaffold.task_id}")
-    
+
+    logger.debug(f"Starting agent for task: {scaffold.task_id}")
+
     prompt = _agent_prompt_for_scaffold(scaffold)
     system_prompt = (
         "You are an expert Terminal-Bench task builder and DV (Design Verification) engineer. "
         "You create clear, well-tested tasks for evaluating AI agents' verification skills. "
         "Work only within the current working directory (cwd). "
-        "Use the Bash tool strictly for `tb tasks build .` and basic local shell commands. "
+        "Use the Bash tool for `tb tasks check` quality validation and `tb tasks build` for Docker builds. "
         "No network access. No package installation. "
-        "Iterate until tb tasks build passes or you determine the task cannot be completed."
+        "Iterate using `tb tasks check` until quality checks pass or you determine the task cannot be completed. "
+        "Pay close attention to quality check failures and fix instruction clarity and test alignment issues."
     )
-    
-    # Create status callback to show agent activity
-    def status_callback(msg: str):
-        logger.info(f"[{scaffold.task_id}] {msg}")
-    
+
     try:
         result = await query_with_pydantic_response(
             prompt=prompt,
@@ -188,18 +246,18 @@ async def _run_agent_with_claude(scaffold: TaskScaffold, logger) -> dict[str, An
             system_prompt=system_prompt,
             cwd=str(scaffold.path),
             allowed_tools=["Read", "Write", "Edit", "Glob", "Grep", "Bash", "create_file", "edit_file"],
-            status_cb=status_callback,
+            status_cb=status_cb,
         )
-        
-        logger.info(
+
+        logger.debug(
             f"Agent completed for {scaffold.task_id}: "
             f"status={result.status}, tb_check_passed={result.tb_check_passed}"
         )
-        
+
         return result.model_dump()
-        
+
     except Exception as exc:
-        logger.error(f"Agent failed for {scaffold.task_id}: {exc}")
+        logger.warning(f"Agent failed for {scaffold.task_id}: {exc}")
         return {
             "task_id": scaffold.task_id,
             "status": "failed",
@@ -237,7 +295,7 @@ async def _run_tb_check(task_dir: Path) -> dict[str, Any]:
     }
 
 
-@flow(name="Build Terminal-Bench Tasks")
+@flow(name="Build Terminal-Bench Tasks", validate_parameters=False)
 async def build_terminal_bench_tasks(
     analysis_data: dict,
     output_dir: str,
@@ -259,7 +317,7 @@ async def build_terminal_bench_tasks(
     output_dir.mkdir(parents=True, exist_ok=True)
 
     plans = prepare_task_plans(analysis, task_types, max_tasks, output_dir)
-    logger.info("Prepared %d task scaffolds", len(plans))
+    logger.debug("Prepared %d task scaffolds", len(plans))
 
     # Run Claude agents to generate task content
     agent_results: list[dict[str, Any]] = []
@@ -268,11 +326,17 @@ async def build_terminal_bench_tasks(
         
         # For single agent, show more detailed progress; for multiple, show progress bar
         if agent_concurrency == 1 and len(plans) == 1:
-            # Single agent - show activity in console without progress bar UI
+            # Single agent - show minimal status
             console.print(f"[cyan]Running Claude agent for task: {plans[0].task_id}[/cyan]")
-            console.print("[dim]Agent activity will be logged as it works...[/dim]\n")
+            console.print("[dim]This may take several minutes...[/dim]\n")
             result = await _run_agent_with_claude(plans[0], logger)
             agent_results = [result]
+
+            # Show summary after completion
+            if result.get("status") == "ok":
+                console.print(f"[green]✓[/green] Task {plans[0].task_id} generated successfully")
+            else:
+                console.print(f"[yellow]⚠[/yellow] Task {plans[0].task_id} had issues")
         else:
             # Multiple agents or tasks - use progress bar
             semaphore = asyncio.Semaphore(agent_concurrency)
@@ -297,8 +361,8 @@ async def build_terminal_bench_tasks(
                         return result
 
                 agent_results = await asyncio.gather(*(run_single(plan) for plan in plans))
-        
-        logger.info("Agent stage complete")
+
+        logger.debug("Agent stage complete")
 
     validation_results: list[dict[str, Any]] = []
     if run_validation:
@@ -311,7 +375,7 @@ async def build_terminal_bench_tasks(
                 return result
 
         validation_results = await asyncio.gather(*(validate_single(plan) for plan in plans))
-        logger.info("Validation stage complete")
+        logger.debug("Validation stage complete")
 
     summary_path = output_dir / "build_summary.json"
     summary = {
@@ -324,4 +388,113 @@ async def build_terminal_bench_tasks(
     return summary
 
 
-__all__ = ["build_terminal_bench_tasks"]
+@flow(name="Build Single Terminal-Bench Task", validate_parameters=False)
+async def build_single_terminal_bench_task(
+    analysis_data: dict,
+    task_id: str,
+    output_dir: str,
+    run_validation: bool = True,
+    console: Console | None = None,
+) -> dict:
+    """Build a single terminal-bench task (simplified flow).
+
+    Args:
+        analysis_data: Repository analysis dictionary
+        task_id: Specific task ID to build
+        output_dir: Output directory for task
+        run_validation: Whether to run tb check validation
+        console: Optional Rich console for output
+
+    Returns:
+        Dictionary with task generation results
+    """
+    try:
+        logger = get_run_logger()
+    except MissingContextError:
+        logger = logging.getLogger("dvsmith.terminal_bench_flow")
+
+    analysis = RepoAnalysis.from_dict(analysis_data)
+    if not analysis.repo_root:
+        raise ValueError("RepoAnalysis.repo_root is required")
+
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Verify task_id exists
+    available_tasks = preview_available_tasks(analysis)
+    task_info = next((t for t in available_tasks if t["task_id"] == task_id), None)
+
+    if not task_info:
+        available_ids = [t["task_id"] for t in available_tasks]
+        raise ValueError(
+            f"Task ID '{task_id}' not found. Available tasks: {', '.join(available_ids)}"
+        )
+
+    logger.debug(f"Building task: {task_id} ({task_info['task_type']}) -> {task_info['target_file']}")
+
+    # Create single scaffold
+    remote_url = analysis.git_remote
+    commit_sha = analysis.git_commit
+    if not remote_url or not commit_sha:
+        raise ValueError("Snapshot must include remote_url and commit_sha to scaffold tasks.")
+
+    scaffolder = TerminalBenchScaffolder(
+        base_dir=output_dir,
+        remote_url=remote_url,
+        commit_sha=commit_sha,
+    )
+    scaffolder.ensure_base()
+
+    scaffold = scaffolder.create_scaffold(
+        task_id=task_id,
+        task_type=task_info["task_type"],
+        target=task_info["target_file"],
+    )
+
+    logger.debug(f"Scaffold created at: {scaffold.path}")
+
+    # Run Claude agent with status updates
+    if console is None:
+        console = Console()
+    console.print(f"[cyan]Generating task: {task_id}[/cyan]")
+    console.print(f"[dim]Type: {task_info['task_type']} | Target: {task_info['target_file']}[/dim]")
+    console.print()
+
+    # Create simple callback that prints each status update
+    def status_callback(msg: str):
+        console.print(f"  [dim]{msg}[/dim]")
+
+    agent_result = await _run_agent_with_claude(
+        scaffold=scaffold,
+        logger=logger,
+        status_cb=status_callback,
+    )
+
+    # Show completion status
+    if agent_result.get("status") == "ok":
+        console.print(f"\n[green]✓[/green] Task generated successfully")
+    else:
+        console.print(f"\n[yellow]⚠[/yellow] Task had issues: {agent_result.get('notes', 'Unknown')}")
+
+    # Run validation if requested
+    validation_result = None
+    if run_validation:
+        validation_result = await _run_tb_check(scaffold.path)
+        validation_result["task_id"] = task_id
+
+    # Save summary
+    summary = {
+        "task_id": task_id,
+        "task_type": task_info["task_type"],
+        "target_file": task_info["target_file"],
+        "agent_result": agent_result,
+        "validation_result": validation_result,
+    }
+
+    summary_path = output_dir / task_id / "build_summary.json"
+    summary_path.write_text(json.dumps(summary, indent=2))
+
+    return summary
+
+
+__all__ = ["build_terminal_bench_tasks", "build_single_terminal_bench_task", "preview_available_tasks"]
