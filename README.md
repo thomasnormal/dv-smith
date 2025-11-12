@@ -68,6 +68,28 @@ tb run -t coverage-apb_master_coverage \
 ./parse_agent_log.py runs/<run-id>/coverage-apb_master_coverage/.../sessions/agent.log
 ```
 
+### Running Tasks from thomas_tasks/
+
+The `thomas_tasks/` directory contains pre-built AXI4 verification tasks that can be run directly with Terminal-Bench:
+
+```bash
+# Run a specific AXI4 task with Claude Code agent
+tb run \
+  --dataset-path thomas_tasks \
+  --task-id axi4_blocking_32b_write_read_test \
+  --agent claude-code \
+  --model anthropic/claude-sonnet-4-5 \
+  --livestream
+
+# Available tasks:
+# - axi4_blocking_32b_write_read_test
+# - axi4_blocking_incr_burst_read_test
+# - axi4_blocking_incr_burst_write_read_test
+# - axi4_blocking_wrap_burst_write_read_test
+```
+
+These tasks are ready-to-use with Docker environments, solution scripts, and grading infrastructure.
+
 For complete documentation on the build command, see [Build Command Documentation](docs/build-command.md).
 
 ### Running `dvsmith build` in Docker (Recommended for Security)
