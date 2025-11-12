@@ -1,0 +1,13 @@
+# Coverage Requirements for INCR Burst Read Test
+# Format: coverpoint|bin|minimum_coverage_percentage
+#
+# These requirements are based on the expected coverage from axi4_blocking_incr_burst_read_test
+# This test performs only read transactions with INCR burst type and 4-byte transfers
+
+# Read Address Channel - Transfer Size
+# Test uses 4-byte (32-bit) transfers only
+ARSIZE_CP|ARSIZE_4BYTES|100
+
+# Read Address Channel - Burst Type
+# Primary focus: INCR burst type
+ARBURST_CP|WRITE_INCR|100

@@ -1,0 +1,16 @@
+# Coverage Requirements for INCR Burst Write/Read Test
+# Format: coverpoint|bin|minimum_coverage_percentage
+#
+# These requirements are based on the expected coverage from axi4_blocking_incr_burst_write_read_test
+
+# Write Address Channel - Transfer Size
+AWSIZE_CP|AWSIZE_2BYTES|100
+
+# Write Address Channel - Burst Type
+AWBURST_CP|WRITE_INCR|100
+
+# Read Address Channel - Transfer Size
+ARSIZE_CP|ARSIZE_4BYTES|100
+
+# Read Address Channel - Burst Type
+ARBURST_CP|WRITE_INCR|100

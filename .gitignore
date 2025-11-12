@@ -67,3 +67,53 @@ simv/
 # Terminal bench
 gym/
 terminal-bench/
+
+# Harbor/Test artifacts
+jobs/
+runs/
+logs/
+
+# Test data files
+*.csv
+*.json
+!package*.json
+!tsconfig*.json
+
+# Test scripts
+alert.sh
+send_alert.sh
+process_log.sh
+process_new_logs.sh
+analyze.py
+heavy_parser.py
+app.py
+
+# Test config files
+config.yaml
+config1.yaml
+config2.yaml
+deployment.yaml
+
+# Test log files
+log1.txt
+log2.txt
+*.log.gz
+
+# Test directories
+.tools/
+test_vmanager/
+simple_vmanager_test/
+skills/
+
+# Markdown artifacts
+triage_command_results.md
+
+# Trace files
+*trace*.jsonl
+*trace*.html
+view_trace.py
+convert_tb_to_openinference.py
+convert_tb_to_openai.py
+*chat*.jsonl
+*complete*.jsonl
+*test*.jsonl

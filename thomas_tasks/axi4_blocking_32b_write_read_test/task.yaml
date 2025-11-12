@@ -1,0 +1,68 @@
+instruction: |-
+  You are given access to a UVM-based AXI4 testbench environment.
+  Read AGENTS.md for details on how to work the testbench.
+
+  Task: Write a UVM test called student_example_32b_write_read_test
+  that performs the following AXI4 transactions:
+
+  ### Write Transactions (2 transactions):
+  - Burst length: Mix of 1 beat (AWLEN=0) and 4 beats (AWLEN=3)
+  - Transfer size: Mix of 1 byte (AWSIZE=0) and 4 bytes (AWSIZE=2)
+  - Burst type: FIXED (AWBURST=0)
+  - At least one transaction should use each burst length
+
+  ### Read Transactions (3 transactions):
+  - Burst length: Mix of 1 beat (ARLEN=0) and 2 beats (ARLEN=1)
+  - Transfer size: Mix of 1 byte (ARSIZE=0) and 4 bytes (ARSIZE=2)
+  - Burst type: Mix of FIXED (ARBURST=0) and INCR (ARBURST=1)
+  - At least one transaction should use each burst length
+
+  ### General Requirements:
+  - The test should perform BLOCKING transfers (not non-blocking)
+  - Use different transaction IDs to test ID handling
+  - Ensure proper handshaking on all AXI4 channels
+
+  ## Grading
+
+  Your test will be graded based on three criteria:
+
+  ### Scoreboard Validation (40%)
+  - No UVM_ERROR or UVM_FATAL messages in simulation
+  - All transactions complete successfully
+
+  ### Functional Coverage (50%)
+  - Write channel coverage bins:
+    - AWLEN_1, AWLEN_4 (burst lengths)
+    - AWSIZE_1BYTE, AWSIZE_4BYTES (transfer sizes)
+    - AWBURST_FIXED (burst type)
+  - Read channel coverage bins:
+    - ARLEN_1, ARLEN_2 (burst lengths)
+    - ARSIZE_1BYTE, ARSIZE_4BYTES (transfer sizes)
+    - ARBURST_FIXED, ARBURST_INCR (burst types)
+
+  ### Performance (10%)
+  - Simulation efficiency (coverage achieved per microsecond of sim time)
+
+  ## Hints
+  1. Extend from `axi4_base_test`
+  2. Create a virtual sequence that starts both write and read sequences
+  3. Use the appropriate master sequences for 32-bit transfers
+  4. The slave should be configured to respond to write and read requests
+  5. Make sure to raise and drop objections appropriately
+
+author_name: DV Smith
+author_email: thomas@normal-computing.ai
+difficulty: easy
+category: verification-engineering
+tags:
+  - coding
+  - verification
+parser:
+  - pytest
+max_agent_timeout_sec: 900.0
+max_test_timeout_sec: 240.0
+run_tests_in_same_shell: false
+disable_asciinema: true
+estimated_duration_sec:
+expert_time_estimate_min: 10
+junior_time_estimate_min: 30

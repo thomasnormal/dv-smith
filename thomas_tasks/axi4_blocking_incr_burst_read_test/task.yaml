@@ -1,0 +1,63 @@
+instruction: |-
+  You are given access to a UVM-based AXI4 testbench environment.
+  Read AGENTS.md for details on how to work the testbench.
+
+  Task: Write a UVM test called axi4_blocking_incr_burst_read_test
+  that performs AXI4 read transactions with INCR burst type.
+
+  ### Read Transactions (3 transactions):
+  - Transfer size: 4 bytes (ARSIZE=2 for 32-bit transfers)
+  - Burst type: INCR (ARBURST=1)
+  - Burst length: Can be random (not constrained)
+
+  ### General Requirements:
+  - The test should perform BLOCKING read transfers (not non-blocking)
+  - This is a READ-ONLY test (no write transactions)
+  - Use INCR burst type for all transactions
+  - Ensure proper handshaking on all AXI4 channels
+
+  ## Grading
+
+  Your test will be graded based on three criteria:
+
+  ### Scoreboard Validation (40%)
+  - No UVM_ERROR or UVM_FATAL messages in simulation
+  - All transactions complete successfully
+
+  ### Functional Coverage (50%)
+  - Read channel coverage bins:
+    - ARSIZE_4BYTES (4-byte transfer size)
+    - ARBURST_CP -> WRITE_INCR (INCR burst type)
+
+  ### Performance (10%)
+  - Simulation efficiency (coverage achieved per microsecond of sim time)
+
+  ## Hints
+  1. Extend from `axi4_base_test`
+  2. Set the environment mode to `ONLY_READ_DATA` in setup_axi4_env_cfg()
+  3. Create a virtual sequence that starts master and slave read sequences
+  4. Use blocking read sequences for both master and slave
+  5. The master sequence should constrain transactions to use INCR burst type
+  6. Run the master sequence 3 times (using `repeat(3)`) to generate multiple transactions
+  7. Start the slave sequence in a `fork/join_none` to handle responses
+  8. Make sure to raise and drop objections appropriately
+
+author_name: DV Smith
+author_email: thomas@normal-computing.ai
+difficulty: easy
+category: verification-engineering
+tags:
+  - coding
+  - verification
+  - axi4
+  - blocking-transactions
+  - read-only
+parser:
+  - pytest
+max_agent_timeout_sec: 900.0
+max_test_timeout_sec: 240.0
+run_tests_in_same_shell: false
+disable_asciinema: true
+estimated_duration_sec: 600
+expert_time_estimate_min: 10
+junior_time_estimate_min: 30

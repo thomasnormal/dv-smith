@@ -1,0 +1,28 @@
+# Exam Requirements for 32-bit Write/Read Test
+# Format: coverpoint|bin|minimum_coverage_percentage
+#
+# These requirements are based on the expected coverage from axi4_blocking_32b_write_read_test
+
+# Write Address Channel - Burst Length
+AWLEN_CP|AWLEN_1|100
+AWLEN_CP|AWLEN_4|100
+
+# Write Address Channel - Transfer Size
+AWSIZE_CP|AWSIZE_1BYTE|100
+AWSIZE_CP|AWSIZE_4BYTES|100
+
+# Write Address Channel - Burst Type
+AWBURST_CP|READ_FIXED|100
+
+# Read Address Channel - Burst Length
+ARLEN_CP|ARLEN_1|100
+ARLEN_CP|ARLEN_2|100
+# ARLEN_CP|ARLEN_16|100  # Removed: Too strict - original sequence doesn't constrain this
+
+# Read Address Channel - Transfer Size
+ARSIZE_CP|ARSIZE_1BYTE|100
+ARSIZE_CP|ARSIZE_4BYTES|100
+
+# Read Address Channel - Burst Type
+ARBURST_CP|READ_FIXED|100
+ARBURST_CP|WRITE_INCR|100

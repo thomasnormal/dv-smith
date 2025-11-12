@@ -1,0 +1,106 @@
+instruction: |-
+  You are given access to a UVM-based AXI4 testbench environment.
+  Read AGENTS.md for details on how to work with the testbench.
+
+  Task: Write a UVM test called student_example_wrap_burst_write_read_test
+  that performs AXI4 transactions with wrapping burst type.
+
+  ### Write Transactions (2 transactions):
+  - Transfer size: 2 bytes (AWSIZE=1, corresponding to WRITE_2_BYTES)
+  - Burst type: WRAP (AWBURST=2, corresponding to WRITE_WRAP)
+  - The test should perform BLOCKING transfers (not non-blocking)
+
+  ### Read Transactions (3 transactions):
+  - Transfer size: 4 bytes (ARSIZE=2, corresponding to READ_4_BYTES)
+  - Burst type: WRAP (ARBURST=2, corresponding to READ_WRAP)
+  - The test should perform BLOCKING transfers (not non-blocking)
+
+  ### General Requirements:
+  - The test should perform BLOCKING transfers (not non-blocking)
+  - Use appropriate transaction IDs for proper ID handling
+  - Ensure proper handshaking on all AXI4 channels
+  - The slave sequences must be started on the slave sequencers to handle incoming transactions
+
+  ## CRITICAL: File Locations and Registration
+
+  **Where to create files:**
+  - Test file: `~/axi4_avip/src/hvl_top/test/student_example_wrap_burst_write_read_test.sv`
+  - Virtual sequence: `~/axi4_avip/src/hvl_top/test/virtual_sequences/<your_vseq>.sv`
+  - Master sequences: `~/axi4_avip/src/hvl_top/test/sequences/master_sequences/<your_seq>.sv`
+
+  **DO NOT** create test files in `/tests/` - that directory is for pytest files only!
+
+  **Package Registration (REQUIRED):**
+  After creating each file, you MUST add an include directive to the appropriate package file:
+  - Test: Add `\`include "student_example_wrap_burst_write_read_test.sv"` to `~/axi4_avip/src/hvl_top/test/axi4_test_pkg.sv`
+  - Virtual sequence: Add `\`include "<your_vseq>.sv"` to `~/axi4_avip/src/hvl_top/test/virtual_sequences/axi4_virtual_seq_pkg.sv`
+  - Master sequences: Add `\`include "<your_seq>.sv"` to `~/axi4_avip/src/hvl_top/test/sequences/master_sequences/axi4_master_seq_pkg.sv`
+
+  The include directives should be added before the `endpackage` statement (or after the last similar include).
+
+  ## CRITICAL: Test Your Code!
+
+  **You MUST compile and simulate your test to verify it works:**
+  ```bash
+  cd ~/axi4_avip/sim/cadence_sim
+  make compile
+  make simulate test=student_example_wrap_burst_write_read_test
+  ```
+
+  If compilation fails, check:
+  - Did you add all necessary `\`include` directives to package files?
+  - Are your files in the correct directories?
+  - Do your class names match the file names?
+
+  If simulation fails, check the log file:
+  ```bash
+  grep -E "UVM_ERROR|UVM_FATAL|UVM_WARNING" student_example_wrap_burst_write_read_test/student_example_wrap_burst_write_read_test.log
+  ```
+
+  **Do not submit without testing!** The grading system will fail immediately if your code doesn't compile or has UVM errors.
+
+  ## Grading
+
+  Your test will be graded based on three criteria:
+
+  ### Scoreboard Validation (40%)
+  - No UVM_ERROR or UVM_FATAL messages in simulation
+  - All transactions complete successfully
+
+  ### Functional Coverage (50%)
+  - Write channel coverage bins:
+    - AWSIZE_2BYTES (transfer size)
+    - AWBURST_WRAP (burst type)
+  - Read channel coverage bins:
+    - ARSIZE_4BYTES (transfer size)
+    - ARBURST_WRAP (burst type)
+
+  ### Performance (10%)
+  - Simulation efficiency (coverage achieved per microsecond of sim time)
+
+  ## Hints
+  1. Extend from `axi4_base_test`
+  2. Create master sequences that constrain the transaction parameters:
+     - For writes: `awsize == WRITE_2_BYTES` and `awburst == WRITE_WRAP`
+     - For reads: `arsize == READ_4_BYTES` and `arburst == READ_WRAP`
+  3. Create a virtual sequence that starts both master and slave sequences
+  4. The slave should use existing slave wrap burst sequences (axi4_slave_bk_write_wrap_burst_seq and axi4_slave_bk_read_wrap_burst_seq)
+  5. Make sure to raise and drop objections appropriately
+  6. Remember to start slave sequences in forever loops using fork/join_none
+
+author_name: DV Smith
+author_email: thomas@normal-computing.ai
+difficulty: easy
+category: verification-engineering
+tags:
+  - coding
+  - verification
+parser:
+  - pytest
+max_agent_timeout_sec: 1800.0
+max_test_timeout_sec: 300.0
+run_tests_in_same_shell: false
+disable_asciinema: true
+estimated_duration_sec:
+expert_time_estimate_min: 10
+junior_time_estimate_min: 30

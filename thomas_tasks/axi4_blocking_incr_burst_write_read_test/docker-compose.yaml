@@ -1,0 +1,23 @@
+services:
+  client:
+    build:
+      dockerfile: Dockerfile
+    image: ${T_BENCH_TASK_DOCKER_CLIENT_IMAGE_NAME}
+    container_name: ${T_BENCH_TASK_DOCKER_CLIENT_CONTAINER_NAME}
+    command: [ "sh", "-c", "sleep infinity" ]
+    init: true  # use tini to handle zombie processes
+    extra_hosts:
+      - "hardware.normalcomputing.net:10.4.120.82"
+    environment:
+      - CDS_LIC_FILE=5280@10.4.120.82
+      - LM_LICENSE_FILE=5280@10.4.120.82
+      - SIM_SCRATCH=/dev/shm/sim_scratch
+      - XCELIUM_CACHE=/xcelium_cache
+      - TB_HOME=/axi4_avip
+      - TEST_NAME=student_example_incr_burst_write_read_test
+    volumes:
+      - /opt/cadence/installs:/opt/cadence/installs
+      - /dev/shm/sim_scratch:/dev/shm/sim_scratch
+      - /var/lib/xcelium_cache:/xcelium_cache
+      - ${T_BENCH_TASK_LOGS_PATH}:${T_BENCH_CONTAINER_LOGS_PATH}
+      - ${T_BENCH_TASK_AGENT_LOGS_PATH}:${T_BENCH_CONTAINER_AGENT_LOGS_PATH}
